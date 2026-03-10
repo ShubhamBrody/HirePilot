@@ -10,6 +10,7 @@ import {
   FiShield,
   FiArrowRight,
 } from "react-icons/fi";
+import { HirePilotLogo } from "@/components/HirePilotLogo";
 
 const features = [
   {
@@ -56,10 +57,8 @@ export default function LandingPage() {
       {/* Navbar */}
       <header className="border-b border-[var(--border)] bg-[var(--card)]">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
-          <div className="flex items-center gap-2">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-600 text-white font-bold text-sm">
-              HP
-            </div>
+          <div className="flex items-center gap-2.5">
+            <HirePilotLogo size={36} />
             <span className="text-xl font-bold text-[var(--foreground)]">
               HirePilot
             </span>
@@ -167,9 +166,7 @@ export default function LandingPage() {
         <div className="mx-auto max-w-6xl px-6 py-8">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-600 text-white font-bold text-xs">
-                HP
-              </div>
+              <HirePilotLogo size={28} />
               <span className="text-sm font-semibold text-[var(--foreground)]">
                 HirePilot
               </span>

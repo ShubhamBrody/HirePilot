@@ -7,6 +7,7 @@ import { useAuthStore } from "@/stores/authStore";
 import { oauthApi } from "@/lib/api";
 import toast from "react-hot-toast";
 import { FiArrowLeft } from "react-icons/fi";
+import { HirePilotLogo } from "@/components/HirePilotLogo";
 
 function LoginForm() {
   const router = useRouter();
@@ -79,8 +80,8 @@ function LoginForm() {
 
         {/* Brand */}
         <div className="text-center">
-          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-600 text-white text-2xl font-bold">
-            HP
+          <div className="mx-auto mb-4">
+            <HirePilotLogo size={56} className="mx-auto" />
           </div>
           <h1 className="text-3xl font-bold text-[var(--foreground)]">
             {isRegister ? "Create Account" : "Welcome Back"}

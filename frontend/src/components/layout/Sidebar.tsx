@@ -13,6 +13,7 @@ import {
 } from "react-icons/fi";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/stores/authStore";
+import { HirePilotLogo } from "@/components/HirePilotLogo";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: FiHome },
@@ -30,10 +31,8 @@ export function Sidebar() {
   return (
     <aside className="flex h-full w-64 flex-col border-r border-[var(--border)] bg-[var(--card)]">
       {/* Brand */}
-      <div className="flex h-16 items-center gap-2 px-6 border-b border-[var(--border)]">
-        <div className="h-8 w-8 rounded-lg bg-brand-600 flex items-center justify-center text-white font-bold text-sm">
-          HP
-        </div>
+      <div className="flex h-16 items-center gap-2.5 px-6 border-b border-[var(--border)]">
+        <HirePilotLogo size={34} />
         <span className="text-lg font-bold text-[var(--foreground)]">
           HirePilot
         </span>
