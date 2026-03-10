@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -27,49 +28,85 @@ const navItems = [
 export function Sidebar() {
   const pathname = usePathname();
   const logout = useAuthStore((s) => s.logout);
+  const [hovered, setHovered] = useState(false);
+
+  const expanded = hovered;
 
   return (
-    <aside className="flex h-full w-64 flex-col border-r border-[var(--border)] bg-[var(--card)]">
-      {/* Brand */}
-      <div className="flex h-16 items-center gap-2.5 px-6 border-b border-[var(--border)]">
-        <HirePilotLogo size={34} />
-        <span className="text-lg font-bold text-[var(--foreground)]">
-          HirePilot
-        </span>
-      </div>
+    <>
+      {/* Collapsed rail — always visible */}
+      <aside
+        className={cn(
+          "relative z-30 flex h-full flex-col border-r border-[var(--border)] bg-[var(--card)] transition-all duration-300 ease-in-out",
+          expanded ? "w-56" : "w-[60px]"
+        )}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+      >
+        {/* Brand */}
+        <div className="flex h-14 items-center border-b border-[var(--border)] px-3 overflow-hidden">
+          <HirePilotLogo size={30} className="shrink-0" />
+          <span
+            className={cn(
+              "ml-2.5 text-base font-bold text-[var(--foreground)] whitespace-nowrap transition-opacity duration-200",
+              expanded ? "opacity-100" : "opacity-0 w-0"
+            )}
+          >
+            HirePilot
+          </span>
+        </div>
 
-      {/* Navigation */}
-      <nav className="flex-1 space-y-1 p-4">
-        {navItems.map(({ href, label, icon: Icon }) => {
-          const isActive = pathname === href || (href !== "/dashboard" && pathname.startsWith(href));
-          return (
-            <Link
-              key={href}
-              href={href}
+        {/* Navigation */}
+        <nav className="flex-1 space-y-1 px-2 py-3 overflow-hidden">
+          {navItems.map(({ href, label, icon: Icon }) => {
+            const isActive =
+              pathname === href ||
+              (href !== "/dashboard" && pathname.startsWith(href));
+            return (
+              <Link
+                key={href}
+                href={href}
+                title={expanded ? undefined : label}
+                className={cn(
+                  "flex items-center rounded-lg px-3 py-2.5 text-sm font-medium transition-colors whitespace-nowrap",
+                  isActive
+                    ? "bg-brand-50 text-brand-700 dark:bg-brand-900/20 dark:text-brand-400"
+                    : "text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)]"
+                )}
+              >
+                <Icon className="h-5 w-5 shrink-0" />
+                <span
+                  className={cn(
+                    "ml-3 transition-opacity duration-200",
+                    expanded ? "opacity-100" : "opacity-0 w-0"
+                  )}
+                >
+                  {label}
+                </span>
+              </Link>
+            );
+          })}
+        </nav>
+
+        {/* Logout */}
+        <div className="border-t border-[var(--border)] px-2 py-3">
+          <button
+            onClick={logout}
+            title={expanded ? undefined : "Sign Out"}
+            className="flex w-full items-center rounded-lg px-3 py-2.5 text-sm font-medium text-[var(--muted-foreground)] hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/10 transition-colors whitespace-nowrap"
+          >
+            <FiLogOut className="h-5 w-5 shrink-0" />
+            <span
               className={cn(
-                "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
-                isActive
-                  ? "bg-brand-50 text-brand-700 dark:bg-brand-900/20 dark:text-brand-400"
-                  : "text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)]"
+                "ml-3 transition-opacity duration-200",
+                expanded ? "opacity-100" : "opacity-0 w-0"
               )}
             >
-              <Icon className="h-5 w-5" />
-              {label}
-            </Link>
-          );
-        })}
-      </nav>
-
-      {/* Logout */}
-      <div className="border-t border-[var(--border)] p-4">
-        <button
-          onClick={logout}
-          className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-[var(--muted-foreground)] hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/10 transition-colors"
-        >
-          <FiLogOut className="h-5 w-5" />
-          Sign Out
-        </button>
-      </div>
-    </aside>
+              Sign Out
+            </span>
+          </button>
+        </div>
+      </aside>
+    </>
   );
 }
