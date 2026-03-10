@@ -121,6 +121,24 @@ services:
       redis:
         condition: service_healthy
 
+  # ─── pgAdmin (Database UI) ───
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@hirepilot.dev
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+      - ./pgadmin-servers.json:/pgadmin4/servers.json
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   # ─── Frontend ───
   frontend:
     build:
@@ -137,3 +155,4 @@ volumes:
   postgres_data:
   redis_data:
   minio_data:
+  pgadmin_data:

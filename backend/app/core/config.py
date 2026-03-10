@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     debug: bool = False
     secret_key: SecretStr = Field(default=SecretStr("change-me"))
     api_v1_prefix: str = "/api/v1"
-    cors_origins: list[str] = ["http://localhost:3000"]
+    cors_origins: list[str] = ["http://localhost:3000", "http://localhost:3001"]
 
     # ── Database ─────────────────────────────────────────────────
     database_url: str = "postgresql+asyncpg://hirepilot:hirepilot@localhost:5432/hirepilot"
