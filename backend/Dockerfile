@@ -15,13 +15,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgbm1 libpango-1.0-0 libcairo2 libasound2 libxshmfence1 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml ./
+# Copy all source
+COPY . .
+
+# Install Python deps
 RUN pip install --no-cache-dir -e ".[dev]"
 
 # Install Playwright browsers
-RUN playwright install chromium
-
-COPY . .
+RUN playwright install --with-deps chromium
 
 EXPOSE 8000
 
