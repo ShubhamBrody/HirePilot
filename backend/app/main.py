@@ -57,12 +57,20 @@ def create_app() -> FastAPI:
     async def health_check() -> dict[str, str]:
         return {"status": "healthy", "service": settings.app_name}
 
-    # ── Global Exception Handler ─────────────────────────────────
+    # ── Global Exception Handlers ───────────────────────────────
     @app.exception_handler(ValueError)
     async def value_error_handler(request: Request, exc: ValueError) -> JSONResponse:
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
             content={"detail": str(exc)},
+        )
+
+    @app.exception_handler(Exception)
+    async def general_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+        logger.error("Unhandled exception", error=str(exc), path=request.url.path)
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"detail": "Internal server error"},
         )
 
     return app
