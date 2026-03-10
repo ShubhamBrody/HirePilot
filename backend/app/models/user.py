@@ -25,6 +25,11 @@ class User(Base):
     full_name: Mapped[str] = mapped_column(String(255), nullable=False)
     phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
     headline: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    # OAuth fields
+    oauth_provider: Mapped[str | None] = mapped_column(String(50), nullable=True)  # google, github
+    oauth_provider_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    avatar_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     skills: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array stored as text
     location: Mapped[str | None] = mapped_column(String(255), nullable=True)

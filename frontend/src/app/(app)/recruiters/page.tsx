@@ -26,7 +26,7 @@ export default function RecruitersPage() {
     try {
       setLoading(true);
       const { data } = await recruitersApi.list({ limit: 100 });
-      setRecruiters(data.items || []);
+      setRecruiters(data.recruiters ?? []);
     } catch {
       toast.error("Failed to load recruiters");
     } finally {

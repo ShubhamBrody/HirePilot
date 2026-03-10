@@ -33,7 +33,7 @@ export default function DashboardPage() {
           jobsApi.list({ limit: 5, sort: "-created_at" }),
         ]);
         setStats(analyticsRes.data);
-        setRecentJobs(jobsRes.data.items || []);
+        setRecentJobs(jobsRes.data.jobs ?? []);
       } catch {
         // Silently handle — dashboard degrades gracefully
       } finally {

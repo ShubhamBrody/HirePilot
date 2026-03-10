@@ -40,7 +40,7 @@ export default function ApplicationsPage() {
       const params: Record<string, unknown> = { limit: 100 };
       if (statusFilter !== "all") params.status = statusFilter;
       const { data } = await applicationsApi.list(params);
-      setApplications(data.items || []);
+      setApplications(data.applications ?? []);
     } catch {
       toast.error("Failed to load applications");
     } finally {

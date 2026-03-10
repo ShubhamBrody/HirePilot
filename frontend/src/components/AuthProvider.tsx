@@ -18,7 +18,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (isLoading) return;
 
-    const isPublic = PUBLIC_ROUTES.includes(pathname);
+    const isPublic =
+      PUBLIC_ROUTES.includes(pathname) ||
+      pathname.startsWith("/login/callback");
 
     if (!isAuthenticated && !isPublic) {
       router.replace("/login");

@@ -56,6 +56,18 @@ export const authApi = {
     api.patch("/auth/me", data),
 };
 
+// ---------- OAuth ----------
+export const oauthApi = {
+  getGoogleUrl: (redirect_uri: string) =>
+    api.get("/oauth/google/url", { params: { redirect_uri } }),
+  googleCallback: (code: string, redirect_uri: string) =>
+    api.post("/oauth/google/callback", { code, redirect_uri }),
+  getGithubUrl: (redirect_uri: string) =>
+    api.get("/oauth/github/url", { params: { redirect_uri } }),
+  githubCallback: (code: string, redirect_uri: string) =>
+    api.post("/oauth/github/callback", { code, redirect_uri }),
+};
+
 // ---------- Jobs ----------
 export const jobsApi = {
   list: (params?: Record<string, unknown>) =>

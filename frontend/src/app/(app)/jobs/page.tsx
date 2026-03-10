@@ -32,7 +32,7 @@ export default function JobsPage() {
         search: search || undefined,
         limit: 50,
       });
-      setJobs(data.items || []);
+      setJobs(data.jobs ?? []);
     } catch {
       toast.error("Failed to load jobs");
     } finally {

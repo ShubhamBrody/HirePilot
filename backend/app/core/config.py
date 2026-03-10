@@ -45,6 +45,13 @@ class Settings(BaseSettings):
     jwt_access_token_expire_minutes: int = 30
     jwt_refresh_token_expire_days: int = 7
 
+    # ── OAuth ────────────────────────────────────────────────────
+    google_client_id: str = ""
+    google_client_secret: SecretStr = Field(default=SecretStr(""))
+    github_client_id: str = ""
+    github_client_secret: SecretStr = Field(default=SecretStr(""))
+    oauth_redirect_base_url: str = "http://localhost:3000"
+
     # ── OpenAI ───────────────────────────────────────────────────
     openai_api_key: SecretStr = Field(default=SecretStr(""))
     openai_model: str = "gpt-4-turbo-preview"

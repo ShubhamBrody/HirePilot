@@ -37,7 +37,7 @@ export default function ResumesPage() {
     try {
       setLoading(true);
       const { data } = await resumesApi.list();
-      setResumes(data.items || data || []);
+      setResumes(data.resumes ?? data ?? []);
     } catch {
       toast.error("Failed to load resumes");
     } finally {
