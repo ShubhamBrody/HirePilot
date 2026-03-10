@@ -77,6 +77,10 @@ class Settings(BaseSettings):
     celery_broker_url: str = "redis://localhost:6379/1"
     celery_result_backend: str = "redis://localhost:6379/2"
 
+    # ── Ollama (Local LLM) ────────────────────────────────────────
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_model: str = "llama3.1"
+
     # ── LaTeX ────────────────────────────────────────────────────
     latex_compiler_path: str = "/usr/bin/pdflatex"
     latex_compile_timeout: int = 30

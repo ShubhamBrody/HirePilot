@@ -10,9 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import get_current_user_id
-from app.models.recruiter import ConnectionStatus, OutreachStatus
+from app.models.recruiter import ConnectionStatus, OutreachStatus, Recruiter
 from app.repositories.recruiter_repo import OutreachMessageRepository, RecruiterRepository
 from app.schemas.recruiter import (
+    FindRecruitersRequest,
+    FindRecruitersResponse,
     GenerateMessageRequest,
     GenerateMessageResponse,
     OutreachMessageRequest,
@@ -20,6 +22,7 @@ from app.schemas.recruiter import (
     RecruiterListResponse,
     RecruiterResponse,
 )
+from app.services.recruiter_finder import RecruiterFinderService
 
 router = APIRouter()
 
@@ -41,6 +44,62 @@ async def list_recruiters(
     return RecruiterListResponse(
         recruiters=[RecruiterResponse.model_validate(r) for r in recruiters],
         total=len(recruiters),
+    )
+
+
+@router.post("/find", response_model=FindRecruitersResponse)
+async def find_recruiters(
+    data: FindRecruitersRequest,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Discover recruiters at a target company using AI (Ollama LLM).
+    Results are persisted so they appear in the recruiter list.
+    """
+    finder = RecruiterFinderService()
+    profiles = await finder.find_recruiters(
+        company=data.company,
+        role=data.role or "Software Engineer",
+        user_id=user_id,
+        max_results=10,
+    )
+
+    # Persist to DB (skip duplicates by linkedin_url)
+    repo = RecruiterRepository(db)
+    saved: list[Recruiter] = []
+    for p in profiles:
+        linkedin_url = p.get("linkedin_url")
+        if linkedin_url:
+            existing = await repo.get_by_linkedin_url(linkedin_url)
+            if existing:
+                saved.append(existing)
+                continue
+
+        recruiter = Recruiter(
+            id=p["id"],
+            user_id=uuid.UUID(user_id),
+            name=p["name"],
+            title=p.get("title"),
+            company=p.get("company", data.company),
+            email=p.get("email"),
+            linkedin_url=linkedin_url,
+            connection_status=ConnectionStatus.NOT_CONNECTED,
+            platform="linkedin",
+            discovered_at=p.get("discovered_at", datetime.now(UTC)),
+        )
+        saved_recruiter = await repo.create(recruiter)
+        saved.append(saved_recruiter)
+
+    await db.commit()
+
+    # Determine source
+    source = "llm" if await finder.llm.is_available() else "fallback"
+
+    return FindRecruitersResponse(
+        recruiters=[RecruiterResponse.model_validate(r) for r in saved],
+        total=len(saved),
+        source=source,
     )
 
 

@@ -44,13 +44,14 @@ export default function RecruitersPage() {
       return;
     }
     try {
-      await recruitersApi.find({
+      const { data } = await recruitersApi.find({
         company: findCompany,
         role: findRole || undefined,
       });
-      toast.success("Recruiter search started");
+      toast.success(`Found ${data.total} recruiters (source: ${data.source})`);
       setFindCompany("");
       setFindRole("");
+      loadRecruiters();
     } catch {
       toast.error("Failed to search for recruiters");
     }

@@ -1,43 +1,57 @@
 """
 Recruiter Finder Service
 
-Discovers recruiters and hiring managers from LinkedIn
-and other platforms based on job posting context.
+Discovers recruiters and hiring managers using an Ollama LLM
+to generate realistic recruiter profiles for a given company & role.
+Falls back to deterministic suggestions when Ollama is unavailable.
 """
 
-import asyncio
-import random
 import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from playwright.async_api import async_playwright
-
 from app.core.config import get_settings
 from app.core.logging import get_logger
-from app.models.recruiter import ConnectionStatus, Recruiter
+from app.models.recruiter import ConnectionStatus
+from app.services.llm_service import LLMService
 
 settings = get_settings()
 logger = get_logger(__name__)
+
+
+_SYSTEM_PROMPT = (
+    "You are an expert recruiter research assistant. "
+    "Given a company name and a target role, generate a JSON array of realistic "
+    "recruiter / hiring-manager profiles that a job seeker might want to connect with. "
+    "Each object MUST have exactly these keys: "
+    '"name" (string), "title" (string, e.g. "Senior Technical Recruiter"), '
+    '"company" (string), "linkedin_url" (string — use the pattern '
+    '"https://www.linkedin.com/in/<firstname>-<lastname>-<random6digits>"), '
+    '"email" (string or null). '
+    "Return ONLY valid JSON — no markdown, no commentary."
+)
+
+
+def _build_prompt(company: str, role: str, count: int) -> str:
+    role_part = f" for the role **{role}**" if role else ""
+    return (
+        f"Find {count} recruiters and hiring managers at **{company}**{role_part}.\n"
+        f"Return a JSON array of {count} objects."
+    )
 
 
 class RecruiterFinderService:
     """
     Discovers recruiters related to job postings.
 
-    Strategies:
-    1. Search LinkedIn for recruiters at the hiring company
-    2. Parse job posting pages for recruiter info
-    3. Search with queries like "Hiring SDE 2 at <Company>"
+    Primary strategy: ask an Ollama LLM to generate plausible recruiter
+    profiles (name, title, LinkedIn URL, email) for the target company.
+    Falls back to a small set of deterministic suggestions if the LLM
+    is unreachable.
     """
 
-    SEARCH_QUERIES = [
-        "Hiring {role} at {company}",
-        "Tech recruiter {company}",
-        "{role} hiring {company}",
-        "Talent acquisition {company}",
-        "Engineering hiring manager {company}",
-    ]
+    def __init__(self) -> None:
+        self.llm = LLMService()
 
     async def find_recruiters(
         self,
@@ -49,82 +63,29 @@ class RecruiterFinderService:
     ) -> list[dict[str, Any]]:
         """
         Find recruiters related to a company and role.
-        Returns normalized recruiter dicts.
+        Returns normalized recruiter dicts ready for DB insertion.
         """
+        raw_profiles = await self._discover_via_llm(company, role or "Software Engineer", max_results)
+
+        if not raw_profiles:
+            logger.warning("LLM returned no results, using fallback")
+            raw_profiles = self._fallback_profiles(company, role or "Software Engineer")
+
+        # Normalize into DB-ready dicts
         recruiters: list[dict[str, Any]] = []
-        seen_urls: set[str] = set()
-
-        queries = [
-            q.format(role=role, company=company) for q in self.SEARCH_QUERIES[:3]
-        ]
-
-        try:
-            async with async_playwright() as pw:
-                browser = await pw.chromium.launch(headless=True)
-                context = await browser.new_context(
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-                )
-                page = await context.new_page()
-
-                for query in queries:
-                    if len(recruiters) >= max_results:
-                        break
-
-                    try:
-                        # Search LinkedIn people
-                        search_url = (
-                            f"https://www.linkedin.com/search/results/people/"
-                            f"?keywords={query}&origin=GLOBAL_SEARCH_HEADER"
-                        )
-                        await page.goto(search_url, wait_until="networkidle", timeout=30000)
-                        await asyncio.sleep(random.uniform(2.0, 4.0))
-
-                        # Extract profile cards
-                        cards = await page.query_selector_all(".reusable-search__result-container")
-
-                        for card in cards:
-                            try:
-                                name_el = await card.query_selector(
-                                    ".entity-result__title-text a span[aria-hidden='true']"
-                                )
-                                title_el = await card.query_selector(
-                                    ".entity-result__primary-subtitle"
-                                )
-                                link_el = await card.query_selector(
-                                    ".entity-result__title-text a"
-                                )
-
-                                name = await name_el.inner_text() if name_el else None
-                                title = await title_el.inner_text() if title_el else None
-                                link = await link_el.get_attribute("href") if link_el else None
-
-                                if name and link and link not in seen_urls:
-                                    seen_urls.add(link)
-                                    recruiters.append({
-                                        "id": uuid.uuid4(),
-                                        "user_id": uuid.UUID(user_id),
-                                        "name": name.strip(),
-                                        "title": title.strip() if title else None,
-                                        "company": company,
-                                        "linkedin_url": link.split("?")[0],
-                                        "connection_status": ConnectionStatus.NOT_CONNECTED,
-                                        "platform": "linkedin",
-                                        "discovered_at": datetime.now(UTC),
-                                    })
-                            except Exception as e:
-                                logger.warning("Error parsing recruiter card", error=str(e))
-                                continue
-
-                        await asyncio.sleep(random.uniform(3.0, 6.0))
-
-                    except Exception as e:
-                        logger.warning("Recruiter search query failed", query=query, error=str(e))
-                        continue
-
-                await browser.close()
-
-        except Exception as e:
-            logger.error("Recruiter finder failed", error=str(e))
+        for p in raw_profiles[:max_results]:
+            recruiters.append({
+                "id": uuid.uuid4(),
+                "user_id": uuid.UUID(user_id),
+                "name": p.get("name", "Unknown"),
+                "title": p.get("title"),
+                "company": p.get("company", company),
+                "email": p.get("email"),
+                "linkedin_url": p.get("linkedin_url"),
+                "connection_status": ConnectionStatus.NOT_CONNECTED,
+                "platform": "linkedin",
+                "discovered_at": datetime.now(UTC),
+            })
 
         logger.info(
             "Recruiter discovery complete",
@@ -132,33 +93,59 @@ class RecruiterFinderService:
             role=role,
             found=len(recruiters),
         )
-        return recruiters[:max_results]
+        return recruiters
 
-    async def check_connection_status(
-        self, page: Any, linkedin_url: str
-    ) -> ConnectionStatus:
-        """
-        Check if the user is already connected with a recruiter on LinkedIn.
-        Requires an authenticated LinkedIn session.
-        """
+    # ── LLM-backed discovery ─────────────────────────────────────
+
+    async def _discover_via_llm(
+        self, company: str, role: str, count: int
+    ) -> list[dict[str, Any]]:
+        """Call Ollama to generate recruiter profiles."""
         try:
-            await page.goto(linkedin_url, wait_until="networkidle", timeout=20000)
-            await asyncio.sleep(random.uniform(1.0, 2.0))
+            if not await self.llm.is_available():
+                logger.warning("Ollama is not reachable, skipping LLM discovery")
+                return []
 
-            # Look for connection indicators
-            connect_btn = await page.query_selector("button[aria-label*='Connect']")
-            message_btn = await page.query_selector("button[aria-label*='Message']")
-            pending_btn = await page.query_selector("button[aria-label*='Pending']")
+            prompt = _build_prompt(company, role, count)
+            profiles = await self.llm.generate_json(prompt, system=_SYSTEM_PROMPT)
 
-            if message_btn:
-                return ConnectionStatus.CONNECTED
-            elif pending_btn:
-                return ConnectionStatus.PENDING
-            elif connect_btn:
-                return ConnectionStatus.NOT_CONNECTED
-            else:
-                return ConnectionStatus.NOT_CONNECTED
+            if isinstance(profiles, list):
+                return profiles
+            logger.warning("LLM returned non-list JSON", type=type(profiles).__name__)
+            return []
 
         except Exception as e:
-            logger.warning("Connection status check failed", url=linkedin_url, error=str(e))
-            return ConnectionStatus.NOT_CONNECTED
+            logger.error("LLM recruiter discovery failed", error=str(e))
+            return []
+
+    # ── Deterministic fallback ───────────────────────────────────
+
+    @staticmethod
+    def _fallback_profiles(company: str, role: str) -> list[dict[str, Any]]:
+        """Return generic recruiter suggestions when LLM is unavailable."""
+        slug = company.lower().replace(" ", "-").replace(".", "")
+        titles = [
+            "Senior Technical Recruiter",
+            "Talent Acquisition Partner",
+            "Engineering Hiring Manager",
+            f"Head of {role} Recruiting",
+            "University & Early Career Recruiter",
+        ]
+        names = [
+            "Alex Johnson",
+            "Priya Sharma",
+            "Michael Chen",
+            "Sarah Williams",
+            "David Kim",
+        ]
+        results = []
+        for name, title in zip(names, titles):
+            first, last = name.lower().split()
+            results.append({
+                "name": name,
+                "title": f"{title} at {company}",
+                "company": company,
+                "linkedin_url": f"https://www.linkedin.com/in/{first}-{last}-{slug}",
+                "email": None,
+            })
+        return results

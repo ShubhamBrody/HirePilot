@@ -64,6 +64,18 @@ class OutreachMessageResponse(BaseModel):
         return str(v)
 
 
+class FindRecruitersRequest(BaseModel):
+    """Request to discover recruiters at a company."""
+    company: str = Field(description="Target company name")
+    role: str | None = Field(None, description="Target role (e.g. 'SDE 2', 'Backend Engineer')")
+
+
+class FindRecruitersResponse(BaseModel):
+    recruiters: list[RecruiterResponse]
+    total: int
+    source: str = Field(description="How recruiters were discovered: 'llm' or 'linkedin'")
+
+
 class GenerateMessageRequest(BaseModel):
     """Preview AI-generated message without sending."""
     recruiter_id: str
