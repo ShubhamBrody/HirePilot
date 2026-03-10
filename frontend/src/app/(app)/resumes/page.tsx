@@ -13,6 +13,9 @@ import {
   FiLoader,
   FiAlertCircle,
   FiSave,
+  FiFileText,
+  FiChevronLeft,
+  FiChevronRight,
 } from "react-icons/fi";
 import { resumesApi } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
@@ -60,6 +63,11 @@ export default function ResumesPage() {
   const [compiling, setCompiling] = useState(false);
   const [compileErrors, setCompileErrors] = useState<string[]>([]);
   const prevPdfUrl = useRef<string | null>(null);
+
+  // Sidebar state
+  const [sidebarPinned, setSidebarPinned] = useState(false);
+  const [sidebarHover, setSidebarHover] = useState(false);
+  const sidebarOpen = sidebarPinned || sidebarHover;
 
   const loadResumes = useCallback(async () => {
     try {
@@ -186,95 +194,153 @@ export default function ResumesPage() {
   const showPreview = viewMode === "split" || viewMode === "preview";
 
   return (
-    <div className="flex h-[calc(100vh-3rem)] gap-0">
-      {/* ─── Sidebar: resume list ─── */}
-      <div className="w-60 shrink-0 border-r border-[var(--border)] bg-[var(--card)] flex flex-col">
-        <div className="flex items-center justify-between px-3 py-3 border-b border-[var(--border)]">
-          <h1 className="text-base font-bold text-[var(--foreground)]">Resumes</h1>
-          <button
-            onClick={() => setShowNew(true)}
-            className="btn-primary flex items-center gap-1 text-xs px-2 py-1"
-          >
-            <FiPlus className="h-3 w-3" /> New
-          </button>
+    <div className="flex h-[calc(100vh-3rem)] gap-0 relative">
+      {/* ─── Sidebar: collapsible resume list ─── */}
+      <div
+        className={`shrink-0 border-r border-[var(--border)] bg-[var(--card)] flex flex-col transition-all duration-300 ease-in-out z-20 ${
+          sidebarOpen ? "w-60" : "w-10"
+        } ${!sidebarPinned && sidebarHover ? "absolute inset-y-0 left-0 shadow-2xl" : "relative"}`}
+        onMouseEnter={() => setSidebarHover(true)}
+        onMouseLeave={() => setSidebarHover(false)}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-2 py-2.5 border-b border-[var(--border)] min-h-[44px]">
+          {sidebarOpen ? (
+            <>
+              <h1 className="text-sm font-bold text-[var(--foreground)] pl-1 whitespace-nowrap">Resumes</h1>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setShowNew(true)}
+                  className="btn-primary flex items-center gap-1 text-[10px] px-1.5 py-0.5"
+                  title="New Resume"
+                >
+                  <FiPlus className="h-3 w-3" />
+                </button>
+                <button
+                  onClick={() => setSidebarPinned(!sidebarPinned)}
+                  className="p-1 rounded text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)]/50 transition-colors"
+                  title={sidebarPinned ? "Unpin sidebar" : "Pin sidebar"}
+                >
+                  {sidebarPinned ? <FiChevronLeft className="h-3.5 w-3.5" /> : <FiChevronRight className="h-3.5 w-3.5" />}
+                </button>
+              </div>
+            </>
+          ) : (
+            <button
+              className="w-full flex justify-center p-1 text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors"
+              title="Expand sidebar"
+            >
+              <FiFileText className="h-4 w-4" />
+            </button>
+          )}
         </div>
 
-        {showNew && (
-          <div className="mx-2 mt-2 p-2 rounded-lg border border-[var(--border)] bg-[var(--background)] space-y-2">
-            <input
-              type="text"
-              placeholder="Resume name"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleCreate()}
-              className="input text-sm w-full"
-              autoFocus
-            />
-            <div className="flex gap-2">
-              <button onClick={handleCreate} className="btn-primary text-xs px-2 py-1">
-                Create
-              </button>
-              <button
-                onClick={() => {
-                  setShowNew(false);
-                  setNewName("");
-                }}
-                className="btn-secondary text-xs px-2 py-1"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        )}
-
-        <div className="flex-1 overflow-y-auto px-2 py-2 space-y-1.5">
-          {loading ? (
-            <div className="flex justify-center py-8">
-              <div className="h-5 w-5 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
-            </div>
-          ) : resumes.length === 0 ? (
-            <p className="text-center text-xs text-[var(--muted-foreground)] py-8">
-              No resumes yet. Create one to get started.
-            </p>
-          ) : (
-            resumes.map((r) => (
-              <div
-                key={r.id}
-                onClick={() => selectResume(r)}
-                className={`rounded-lg px-3 py-2 cursor-pointer transition-all text-sm border ${
-                  selected?.id === r.id
-                    ? "border-brand-500 bg-brand-500/10"
-                    : "border-transparent hover:bg-[var(--muted)]/50"
-                }`}
-              >
-                <div className="flex items-center gap-1.5">
-                  {r.is_master && <FiStar className="h-3 w-3 text-yellow-500 shrink-0" />}
-                  <span className="font-medium text-[var(--foreground)] truncate text-xs">
-                    {r.name}
-                  </span>
-                  <span className="ml-auto text-[10px] text-[var(--muted-foreground)] shrink-0">
-                    v{r.version_number}
-                  </span>
-                </div>
-                <div className="mt-1 flex items-center justify-between">
-                  <span className="text-[10px] text-[var(--muted-foreground)]">
-                    {formatDate(r.created_at)}
-                  </span>
+        {/* Content — only visible when open */}
+        {sidebarOpen && (
+          <>
+            {showNew && (
+              <div className="mx-2 mt-2 p-2 rounded-lg border border-[var(--border)] bg-[var(--background)] space-y-2">
+                <input
+                  type="text"
+                  placeholder="Resume name"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleCreate()}
+                  className="input text-sm w-full"
+                  autoFocus
+                />
+                <div className="flex gap-2">
+                  <button onClick={handleCreate} className="btn-primary text-xs px-2 py-1">
+                    Create
+                  </button>
                   <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDelete(r.id);
+                    onClick={() => {
+                      setShowNew(false);
+                      setNewName("");
                     }}
-                    className="text-[var(--muted-foreground)] hover:text-red-500 transition-colors"
+                    className="btn-secondary text-xs px-2 py-1"
                   >
-                    <FiTrash2 className="h-3 w-3" />
+                    Cancel
                   </button>
                 </div>
               </div>
-            ))
-          )}
-        </div>
+            )}
+
+            <div className="flex-1 overflow-y-auto px-2 py-2 space-y-1">
+              {loading ? (
+                <div className="flex justify-center py-8">
+                  <div className="h-5 w-5 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
+                </div>
+              ) : resumes.length === 0 ? (
+                <p className="text-center text-xs text-[var(--muted-foreground)] py-8">
+                  No resumes yet.
+                </p>
+              ) : (
+                resumes.map((r) => (
+                  <div
+                    key={r.id}
+                    onClick={() => { selectResume(r); if (!sidebarPinned) setSidebarHover(false); }}
+                    className={`rounded-lg px-3 py-2 cursor-pointer transition-all text-sm border ${
+                      selected?.id === r.id
+                        ? "border-brand-500 bg-brand-500/10"
+                        : "border-transparent hover:bg-[var(--muted)]/50"
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      {r.is_master && <FiStar className="h-3 w-3 text-yellow-500 shrink-0" />}
+                      <span className="font-medium text-[var(--foreground)] truncate text-xs">
+                        {r.name}
+                      </span>
+                      <span className="ml-auto text-[10px] text-[var(--muted-foreground)] shrink-0">
+                        v{r.version_number}
+                      </span>
+                    </div>
+                    <div className="mt-1 flex items-center justify-between">
+                      <span className="text-[10px] text-[var(--muted-foreground)]">
+                        {formatDate(r.created_at)}
+                      </span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDelete(r.id);
+                        }}
+                        className="text-[var(--muted-foreground)] hover:text-red-500 transition-colors"
+                      >
+                        <FiTrash2 className="h-3 w-3" />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </>
+        )}
+
+        {/* Collapsed state: show icons for each resume */}
+        {!sidebarOpen && (
+          <div className="flex-1 overflow-y-auto py-2 space-y-1 flex flex-col items-center">
+            {resumes.slice(0, 10).map((r) => (
+              <button
+                key={r.id}
+                onClick={() => selectResume(r)}
+                className={`w-7 h-7 rounded flex items-center justify-center text-[10px] font-bold transition-colors ${
+                  selected?.id === r.id
+                    ? "bg-brand-500 text-white"
+                    : "text-[var(--muted-foreground)] hover:bg-[var(--muted)]/50"
+                }`}
+                title={r.name}
+              >
+                {r.name.charAt(0).toUpperCase()}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
+
+      {/* Spacer when sidebar is unpinned overlay to prevent content shift */}
+      {!sidebarPinned && (
+        <div className="w-10 shrink-0" />
+      )}
 
       {/* ─── Main content: Editor + Preview ─── */}
       {selected ? (
@@ -465,7 +531,7 @@ export default function ResumesPage() {
                     </div>
                   ) : pdfUrl ? (
                     <iframe
-                      src={pdfUrl}
+                      src={`${pdfUrl}#toolbar=0&navpanes=0&scrollbar=1&view=FitH`}
                       className="w-full h-full border-0"
                       title="PDF Preview"
                     />
