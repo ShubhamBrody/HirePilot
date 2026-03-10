@@ -1,0 +1,81 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: #ffffff;
+    --foreground: #0f172a;
+    --card: #ffffff;
+    --card-foreground: #0f172a;
+    --border: #e2e8f0;
+    --muted: #f1f5f9;
+    --muted-foreground: #64748b;
+    --accent: #3b82f6;
+    --accent-foreground: #ffffff;
+    --destructive: #ef4444;
+    --success: #22c55e;
+    --warning: #f59e0b;
+  }
+
+  .dark {
+    --background: #0f172a;
+    --foreground: #f8fafc;
+    --card: #1e293b;
+    --card-foreground: #f8fafc;
+    --border: #334155;
+    --muted: #1e293b;
+    --muted-foreground: #94a3b8;
+    --accent: #60a5fa;
+    --accent-foreground: #0f172a;
+    --destructive: #f87171;
+    --success: #4ade80;
+    --warning: #fbbf24;
+  }
+
+  body {
+    @apply bg-[var(--background)] text-[var(--foreground)] antialiased;
+    font-family: "Inter", system-ui, sans-serif;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white
+      transition-colors hover:bg-brand-700 focus:outline-none focus:ring-2
+      focus:ring-brand-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-secondary {
+    @apply rounded-lg border border-[var(--border)] bg-[var(--card)] px-4 py-2
+      text-sm font-medium text-[var(--foreground)] transition-colors
+      hover:bg-[var(--muted)] focus:outline-none focus:ring-2 focus:ring-brand-500
+      focus:ring-offset-2;
+  }
+
+  .btn-danger {
+    @apply rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white
+      transition-colors hover:bg-red-700 focus:outline-none focus:ring-2
+      focus:ring-red-500 focus:ring-offset-2;
+  }
+
+  .card {
+    @apply rounded-xl border border-[var(--border)] bg-[var(--card)] p-6 shadow-sm;
+  }
+
+  .input {
+    @apply w-full rounded-lg border border-[var(--border)] bg-[var(--background)]
+      px-3 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--muted-foreground)]
+      focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500;
+  }
+
+  .badge {
+    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium;
+  }
+
+  .badge-blue { @apply bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400; }
+  .badge-green { @apply bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400; }
+  .badge-yellow { @apply bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400; }
+  .badge-red { @apply bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400; }
+  .badge-gray { @apply bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300; }
+}
