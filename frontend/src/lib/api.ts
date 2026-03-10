@@ -95,12 +95,14 @@ export const jobsApi = {
 export const resumesApi = {
   list: () => api.get("/resumes"),
   get: (id: string) => api.get(`/resumes/${id}`),
-  create: (data: { name: string; latex_content: string; is_master?: boolean }) =>
+  create: (data: { name: string; latex_source: string; is_master?: boolean }) =>
     api.post("/resumes", data),
-  update: (id: string, data: { name?: string; latex_content?: string }) =>
-    api.put(`/resumes/${id}`, data),
+  update: (id: string, data: { name?: string; latex_source?: string }) =>
+    api.patch(`/resumes/${id}`, data),
   delete: (id: string) => api.delete(`/resumes/${id}`),
   compile: (id: string) => api.post(`/resumes/${id}/compile`),
+  compilePreview: (latex_source: string) =>
+    api.post("/resumes/compile-preview", { latex_source }, { responseType: "blob" }),
   tailor: (id: string, data: { job_listing_id: string }) =>
     api.post(`/resumes/${id}/tailor`, data),
   templates: () => api.get("/resumes/templates"),

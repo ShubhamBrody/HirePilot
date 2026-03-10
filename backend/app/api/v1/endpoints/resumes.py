@@ -3,6 +3,8 @@ Resume Endpoints — CRUD, compilation, tailoring, templates.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import Response
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -18,6 +20,7 @@ from app.schemas.resume import (
     ResumeVersionResponse,
     ResumeVersionUpdateRequest,
 )
+from app.services.latex_compiler import LatexCompilerService
 from app.services.resume_service import ResumeService
 
 router = APIRouter()
@@ -66,6 +69,44 @@ async def list_templates(db: AsyncSession = Depends(get_db)):
     repo = ResumeTemplateRepository(db)
     templates = await repo.get_active_templates()
     return [ResumeTemplateResponse.model_validate(t) for t in templates]
+
+
+class CompilePreviewRequest(BaseModel):
+    latex_source: str
+
+
+@router.post("/compile-preview")
+async def compile_preview(
+    data: CompilePreviewRequest,
+    user_id: str = Depends(get_current_user_id),  # noqa: ARG001
+):
+    """
+    Compile LaTeX source on-the-fly and return the PDF as bytes.
+    Used for the live preview panel.
+    """
+    if not data.latex_source or not data.latex_source.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="LaTeX source is required",
+        )
+
+    compiler = LatexCompilerService()
+    result = await compiler.compile(data.latex_source)
+
+    if not result["success"]:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "message": "LaTeX compilation failed",
+                "errors": result["errors"][:10],
+            },
+        )
+
+    return Response(
+        content=result["pdf_data"],
+        media_type="application/pdf",
+        headers={"Content-Disposition": "inline; filename=preview.pdf"},
+    )
 
 
 @router.get("/{resume_id}", response_model=ResumeVersionResponse)
