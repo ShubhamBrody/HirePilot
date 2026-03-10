@@ -54,6 +54,19 @@ export const authApi = {
   profile: () => api.get("/auth/me"),
   updateProfile: (data: Record<string, unknown>) =>
     api.patch("/auth/me", data),
+  deleteAccount: () => api.delete("/auth/me"),
+  changePassword: (data: { current_password: string; new_password: string }) =>
+    api.post("/auth/change-password", data),
+  // Credentials
+  getCredentials: () => api.get("/auth/credentials"),
+  saveCredential: (data: { platform: string; username: string; password: string }) =>
+    api.post("/auth/credentials", data),
+  deleteCredential: (platform: string) =>
+    api.delete(`/auth/credentials/${platform}`),
+  // Preferences
+  getPreferences: () => api.get("/auth/preferences"),
+  updatePreferences: (data: { job_search_keywords?: string; preferred_location?: string }) =>
+    api.put("/auth/preferences", data),
 };
 
 // ---------- OAuth ----------

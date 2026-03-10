@@ -45,6 +45,10 @@ class User(Base):
     # Master resume (LaTeX source)
     master_resume_latex: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Job search preferences
+    job_search_keywords: Mapped[str | None] = mapped_column(Text, nullable=True)
+    preferred_location: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False)
 

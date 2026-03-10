@@ -5,6 +5,18 @@ interface User {
   id: string;
   email: string;
   full_name: string;
+  phone: string | null;
+  headline: string | null;
+  summary: string | null;
+  skills: string | null;
+  location: string | null;
+  linkedin_url: string | null;
+  github_url: string | null;
+  portfolio_url: string | null;
+  job_search_keywords: string | null;
+  preferred_location: string | null;
+  is_active: boolean;
+  is_verified: boolean;
 }
 
 interface AuthState {
@@ -15,6 +27,7 @@ interface AuthState {
   register: (email: string, password: string, full_name: string) => Promise<void>;
   logout: () => void;
   loadUser: () => Promise<void>;
+  refreshUser: () => Promise<void>;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -58,6 +71,15 @@ export const useAuthStore = create<AuthState>((set) => ({
       set({ user: data, isAuthenticated: true, isLoading: false });
     } catch {
       set({ user: null, isAuthenticated: false, isLoading: false });
+    }
+  },
+
+  refreshUser: async () => {
+    try {
+      const { data } = await authApi.profile();
+      set({ user: data });
+    } catch {
+      // silently ignore
     }
   },
 }));

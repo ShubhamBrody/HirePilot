@@ -67,7 +67,7 @@ class BaseRepository(Generic[ModelType]):
     async def update(self, entity: ModelType, data: dict[str, Any]) -> ModelType:
         """Update an entity with the given data dict."""
         for key, value in data.items():
-            if hasattr(entity, key) and value is not None:
+            if hasattr(entity, key):
                 setattr(entity, key, value)
         await self.session.flush()
         await self.session.refresh(entity)
