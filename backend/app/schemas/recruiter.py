@@ -4,7 +4,7 @@ Recruiter & Outreach Schemas
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.models.recruiter import ConnectionStatus, OutreachStatus
 
@@ -22,6 +22,11 @@ class RecruiterResponse(BaseModel):
     discovered_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def coerce_id_to_str(cls, v: object) -> str:
+        return str(v)
 
 
 class RecruiterListResponse(BaseModel):
@@ -52,6 +57,11 @@ class OutreachMessageResponse(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @field_validator("id", "recruiter_id", mode="before")
+    @classmethod
+    def coerce_uuid_to_str(cls, v: object) -> str:
+        return str(v)
 
 
 class GenerateMessageRequest(BaseModel):

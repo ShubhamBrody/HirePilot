@@ -53,7 +53,7 @@ export const authApi = {
     api.post("/auth/login", data),
   profile: () => api.get("/auth/me"),
   updateProfile: (data: Record<string, unknown>) =>
-    api.put("/auth/me", data),
+    api.patch("/auth/me", data),
 };
 
 // ---------- Jobs ----------

@@ -15,7 +15,7 @@ import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/stores/authStore";
 
 const navItems = [
-  { href: "/", label: "Dashboard", icon: FiHome },
+  { href: "/dashboard", label: "Dashboard", icon: FiHome },
   { href: "/jobs", label: "Jobs", icon: FiBriefcase },
   { href: "/resumes", label: "Resumes", icon: FiFileText },
   { href: "/applications", label: "Applications", icon: FiSend },
@@ -42,8 +42,7 @@ export function Sidebar() {
       {/* Navigation */}
       <nav className="flex-1 space-y-1 p-4">
         {navItems.map(({ href, label, icon: Icon }) => {
-          const isActive =
-            href === "/" ? pathname === "/" : pathname.startsWith(href);
+          const isActive = pathname === href || (href !== "/dashboard" && pathname.startsWith(href));
           return (
             <Link
               key={href}

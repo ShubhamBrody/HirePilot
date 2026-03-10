@@ -30,8 +30,8 @@ class AuthService:
         self.session = session
         self.user_repo = UserRepository(session)
 
-    async def register(self, data: UserRegisterRequest) -> UserProfileResponse:
-        """Register a new user account."""
+    async def register(self, data: UserRegisterRequest) -> TokenResponse:
+        """Register a new user account and return JWT tokens."""
         # Check if email already exists
         if await self.user_repo.email_exists(data.email):
             raise ValueError("Email already registered")
@@ -45,7 +45,10 @@ class AuthService:
             headline=data.headline,
         )
         user = await self.user_repo.create(user)
-        return UserProfileResponse.model_validate(user)
+        # Auto-login: return tokens
+        access_token = create_access_token(str(user.id))
+        refresh_token = create_refresh_token(str(user.id))
+        return TokenResponse(access_token=access_token, refresh_token=refresh_token)
 
     async def login(self, email: str, password: str) -> TokenResponse:
         """Authenticate user and return JWT tokens."""

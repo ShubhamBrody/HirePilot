@@ -2,7 +2,7 @@
 Auth Schemas — Registration, Login, Token responses.
 """
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 class UserRegisterRequest(BaseModel):
@@ -44,6 +44,11 @@ class UserProfileResponse(BaseModel):
     is_verified: bool
 
     model_config = {"from_attributes": True}
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def coerce_id_to_str(cls, v: object) -> str:
+        return str(v)
 
 
 class UserProfileUpdateRequest(BaseModel):

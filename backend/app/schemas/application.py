@@ -4,7 +4,7 @@ Application Schemas — CRUD, status updates, filtering, analytics.
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.models.application import ApplicationMethod, ApplicationStatus
 
@@ -46,6 +46,11 @@ class ApplicationResponse(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @field_validator("id", "user_id", "job_listing_id", "resume_version_id", mode="before")
+    @classmethod
+    def coerce_uuid_to_str(cls, v: object) -> str:
+        return str(v)
 
 
 class ApplicationListResponse(BaseModel):

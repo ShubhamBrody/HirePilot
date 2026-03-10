@@ -4,7 +4,7 @@ Resume Schemas — Resume version CRUD, tailoring requests, compilation.
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class ResumeVersionCreateRequest(BaseModel):
@@ -51,6 +51,11 @@ class ResumeVersionResponse(BaseModel):
 
     model_config = {"from_attributes": True}
 
+    @field_validator("id", "template_id", mode="before")
+    @classmethod
+    def coerce_uuid_to_str(cls, v: object) -> str | None:
+        return str(v) if v is not None else None
+
 
 class ResumeListResponse(BaseModel):
     resumes: list[ResumeVersionResponse]
@@ -96,3 +101,8 @@ class ResumeTemplateResponse(BaseModel):
     preview_image_url: str | None = None
 
     model_config = {"from_attributes": True}
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def coerce_id_to_str(cls, v: object) -> str:
+        return str(v)

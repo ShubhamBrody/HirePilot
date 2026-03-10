@@ -4,7 +4,7 @@ Job Schemas — Search filters, job listing responses, match scoring.
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.models.job import JobSource
 
@@ -47,6 +47,11 @@ class JobListingResponse(BaseModel):
     discovered_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def coerce_id_to_str(cls, v: object) -> str:
+        return str(v)
 
 
 class JobListingListResponse(BaseModel):

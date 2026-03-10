@@ -26,21 +26,24 @@ export const useAuthStore = create<AuthState>((set) => ({
     const { data } = await authApi.login({ email, password });
     localStorage.setItem("access_token", data.access_token);
     localStorage.setItem("refresh_token", data.refresh_token);
-    set({ user: data.user, isAuthenticated: true });
+    // Fetch user profile after login
+    const profileRes = await authApi.profile();
+    set({ user: profileRes.data, isAuthenticated: true });
   },
 
   register: async (email, password, full_name) => {
     const { data } = await authApi.register({ email, password, full_name });
     localStorage.setItem("access_token", data.access_token);
     localStorage.setItem("refresh_token", data.refresh_token);
-    set({ user: data.user, isAuthenticated: true });
+    // Fetch user profile after registration
+    const profileRes = await authApi.profile();
+    set({ user: profileRes.data, isAuthenticated: true });
   },
 
   logout: () => {
     localStorage.removeItem("access_token");
     localStorage.removeItem("refresh_token");
     set({ user: null, isAuthenticated: false });
-    window.location.href = "/login";
   },
 
   loadUser: async () => {
