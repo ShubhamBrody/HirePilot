@@ -1,29 +1,41 @@
 ##############################################
-#  HirePilot — Stop Application
+#  HirePilot - Stop Application
 ##############################################
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Definition
 Push-Location $root
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "       HirePilot  —  Shutting Down       " -ForegroundColor Cyan
+Write-Host "       HirePilot - Shutting Down        " -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
-# ── 1. Stop all Docker Compose services ─────────────────────
+# -- 1. Check Docker is available ------------------------------
 Write-Host "[1/2] Stopping Docker Compose services..." -ForegroundColor Yellow
-docker compose down 2>&1 | ForEach-Object {
-    if ($_ -match "Removed|Stopped|removed|stopped") {
-        Write-Host "  $_" -ForegroundColor DarkGray
-    } elseif ($_ -match "error|Error") {
-        Write-Host "  $_" -ForegroundColor Red
-    }
-}
-Write-Host "  All containers stopped and removed." -ForegroundColor Green
+$dockerOk = $false
+try {
+    $null = docker info 2>&1
+    if ($LASTEXITCODE -eq 0) { $dockerOk = $true }
+} catch { }
 
-# ── 2. Kill any leftover processes on app ports ──────────────
+if ($dockerOk) {
+    $downOutput = docker compose down 2>&1
+    foreach ($line in $downOutput) {
+        $s = "$line"
+        if ($s -match "Removed|Stopped|removed|stopped") {
+            Write-Host "  $s" -ForegroundColor DarkGray
+        } elseif ($s -match "error|Error" -and $s -notmatch "NativeCommandError") {
+            Write-Host "  $s" -ForegroundColor Red
+        }
+    }
+    Write-Host "  All containers stopped and removed." -ForegroundColor Green
+} else {
+    Write-Host "  Docker is not running - skipping container shutdown." -ForegroundColor DarkYellow
+}
+
+# -- 2. Kill any leftover processes on app ports ---------------
 Write-Host ""
 Write-Host "[2/2] Cleaning up leftover port bindings..." -ForegroundColor Yellow
 $ports = @(3000, 8000, 5432, 6379, 9000, 9001, 5050, 4444, 7900)
@@ -32,12 +44,11 @@ foreach ($port in $ports) {
     $conn = Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue |
             Where-Object { $_.State -eq "Listen" }
     if ($conn) {
-        $pid = $conn[0].OwningProcess
-        $proc = Get-Process -Id $pid -ErrorAction SilentlyContinue
-        # Don't kill Ollama or Docker Desktop itself
-        if ($proc -and $proc.ProcessName -notmatch "ollama|com\.docker|Docker Desktop|vpnkit") {
-            Write-Host "  Killing $($proc.ProcessName) (PID $pid) on port $port" -ForegroundColor DarkYellow
-            Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+        $procId = $conn[0].OwningProcess
+        $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
+        if ($proc -and $proc.ProcessName -notmatch "ollama|com\.docker|Docker Desktop|vpnkit|dockerd") {
+            Write-Host "  Killing $($proc.ProcessName) (PID $procId) on port $port" -ForegroundColor DarkYellow
+            Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
             $killed++
         }
     }
@@ -48,10 +59,10 @@ if ($killed -eq 0) {
     Write-Host "  Cleaned up $killed process(es)." -ForegroundColor Green
 }
 
-# ── Done ─────────────────────────────────────────────────────
+# -- Done ------------------------------------------------------
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Green
-Write-Host "       HirePilot is STOPPED              " -ForegroundColor Green
+Write-Host "       HirePilot is STOPPED             " -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "  Note: Ollama is still running (shared system service)." -ForegroundColor DarkGray
