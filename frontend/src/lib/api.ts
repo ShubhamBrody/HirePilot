@@ -65,8 +65,18 @@ export const authApi = {
     api.delete(`/auth/credentials/${platform}`),
   // Preferences
   getPreferences: () => api.get("/auth/preferences"),
-  updatePreferences: (data: { job_search_keywords?: string; preferred_location?: string }) =>
-    api.put("/auth/preferences", data),
+  updatePreferences: (data: {
+    job_search_keywords?: string;
+    preferred_location?: string;
+    target_roles?: string[];
+    preferred_technologies?: string[];
+    preferred_companies?: string[];
+    experience_level?: string;
+    email_for_outreach?: string;
+    willing_to_relocate?: boolean;
+    remote_preference?: string;
+    job_type_preference?: string;
+  }) => api.put("/auth/preferences", data),
 };
 
 // ---------- OAuth ----------
@@ -86,9 +96,16 @@ export const jobsApi = {
   list: (params?: Record<string, unknown>) =>
     api.get("/jobs", { params }),
   get: (id: string) => api.get(`/jobs/${id}`),
-  triggerScrape: (data: { keywords: string[]; location?: string; sources?: string[] }) =>
-    api.post("/jobs/scrape", data),
+  delete: (id: string) => api.delete(`/jobs/${id}`),
+  triggerSearch: (data: { filters: Record<string, unknown>; sources?: string[] }) =>
+    api.post("/jobs/search", data),
+  searchLinkedIn: (data: { filters: Record<string, unknown>; sources?: string[] }) =>
+    api.post("/jobs/search-linkedin", data),
   getMatchScore: (id: string) => api.get(`/jobs/${id}/match-score`),
+  topMatches: (params?: { min_score?: number; limit?: number }) =>
+    api.get("/jobs/top-matches", { params }),
+  scrapeUrl: (data: { url: string; resume_id?: string }) =>
+    api.post("/jobs/scrape-url", data),
 };
 
 // ---------- Resumes ----------
@@ -103,9 +120,24 @@ export const resumesApi = {
   compile: (id: string) => api.post(`/resumes/${id}/compile`),
   compilePreview: (latex_source: string) =>
     api.post("/resumes/compile-preview", { latex_source }, { responseType: "blob" }),
-  tailor: (id: string, data: { job_listing_id: string }) =>
-    api.post(`/resumes/${id}/tailor`, data),
+  tailor: (data: { job_listing_id: string; base_resume_id?: string }) =>
+    api.post("/resumes/tailor", data),
   templates: () => api.get("/resumes/templates"),
+  getMaster: () => api.get("/resumes/master"),
+  // AI Chat
+  chat: (data: { resume_id: string; message: string; history?: Array<{ role: string; content: string }> }) =>
+    api.post("/resumes/chat", data),
+  // Parse
+  parse: (id: string) => api.post(`/resumes/${id}/parse`),
+  // Version diff
+  diff: (versionAId: string, versionBId: string) =>
+    api.get(`/resumes/diff/${versionAId}/${versionBId}`),
+  // Rollback
+  rollback: (data: { target_version_id: string }) =>
+    api.post("/resumes/rollback", data),
+  // ATS Score
+  atsScore: (data: { resume_id?: string; job_id?: string; job_description?: string }) =>
+    api.post("/resumes/ats-score", data),
 };
 
 // ---------- Applications ----------
@@ -115,11 +147,84 @@ export const applicationsApi = {
   get: (id: string) => api.get(`/applications/${id}`),
   create: (data: Record<string, unknown>) =>
     api.post("/applications", data),
+  delete: (id: string) => api.delete(`/applications/${id}`),
   updateStatus: (id: string, data: { status: string; notes?: string }) =>
     api.patch(`/applications/${id}/status`, data),
   analytics: () => api.get("/applications/analytics"),
-  autoApply: (data: { job_listing_id: string; resume_version_id: string }) =>
-    api.post("/applications/auto-apply", data),
+  autoApply: (id: string, data: { job_listing_id: string; resume_version_id: string }) =>
+    api.post(`/applications/${id}/apply`, data),
+  getResume: (applicationId: string) =>
+    api.get(`/applications/${applicationId}/resume`),
+
+  // ── Apply Wizard ──
+  wizardStart: (data: { job_listing_id: string }) =>
+    api.post("/applications/wizard/start", data),
+  wizardTailor: (jobListingId: string, data: { wizard_id: string; base_resume_id?: string }) =>
+    api.post(`/applications/wizard/tailor?job_listing_id=${jobListingId}`, data),
+  wizardChat: (data: {
+    wizard_id: string;
+    message: string;
+    current_latex: string;
+    history?: Array<{ role: string; content: string }>;
+  }) => api.post("/applications/wizard/chat", data),
+  wizardApprove: (data: {
+    wizard_id: string;
+    job_listing_id: string;
+    final_latex: string;
+    resume_name?: string;
+  }) => api.post("/applications/wizard/approve", data),
+  wizardApply: (data: { application_id: string }) =>
+    api.post("/applications/wizard/apply", data),
+};
+
+// ---------- Insights ----------
+export const insightsApi = {
+  skills: () => api.get("/insights/skills"),
+  hiringTrends: () => api.get("/insights/hiring-trends"),
+  salaryAnalysis: () => api.get("/insights/salary-analysis"),
+};
+
+// ---------- Onboarding ----------
+export const onboardingApi = {
+  getProgress: () => api.get("/onboarding/progress"),
+  saveStep: (step: number, data: Record<string, unknown>) =>
+    api.post(`/onboarding/step/${step}`, data),
+  classifySkills: (skills: string[]) =>
+    api.post("/onboarding/classify-skills", { skills }),
+  uploadResume: (file: File) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    return api.post("/onboarding/upload-resume", formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+  },
+  getSummary: () => api.get("/onboarding/summary"),
+};
+
+// ---------- Agents ----------
+export const agentsApi = {
+  list: () => api.get("/agents"),
+  status: () => api.get("/agents/status"),
+  run: (name: string, params?: Record<string, unknown>) =>
+    api.post(`/agents/${name}/run`, { params: params || {} }),
+  toggle: (name: string) =>
+    api.post(`/agents/${name}/toggle`, {}),
+  pipeline: (agents: string[]) =>
+    api.post("/agents/pipeline", { agents }),
+  history: (params?: { agent_name?: string; limit?: number }) =>
+    api.get("/agents/history", { params }),
+};
+
+// ---------- Emails ----------
+export const emailsApi = {
+  list: (params?: Record<string, unknown>) =>
+    api.get("/agents/history", { params: { agent_name: "email_checker", ...params } }),
+};
+
+// ---------- Salary Negotiator ----------
+export const salaryNegotiatorApi = {
+  chat: (data: { message: string; context?: Record<string, unknown>; history?: Array<{ role: string; content: string }> }) =>
+    api.post("/agents/salary_negotiator/run", data),
 };
 
 // ---------- Recruiters ----------
@@ -129,10 +234,29 @@ export const recruitersApi = {
   get: (id: string) => api.get(`/recruiters/${id}`),
   find: (data: { company: string; role?: string }) =>
     api.post("/recruiters/find", data),
-  sendOutreach: (id: string, data: { message_type: string; job_title?: string }) =>
+  delete: (id: string) => api.delete(`/recruiters/${id}`),
+  sendOutreach: (id: string, data: { message_type: string; custom_message?: string; job_listing_id?: string }) =>
     api.post(`/recruiters/${id}/outreach`, data),
-  generateMessage: (id: string, data: { message_type: string }) =>
-    api.post(`/recruiters/${id}/generate-message`, data),
+  getMessages: (id: string) => api.get(`/recruiters/${id}/messages`),
+  getAllMessages: (params?: { page?: number; page_size?: number }) =>
+    api.get("/recruiters/messages/all", { params }),
+  generateMessage: (data: { recruiter_id: string; job_listing_id?: string; message_type?: string; tone?: string }) =>
+    api.post("/recruiters/generate-message", data),
+  // LinkedIn direct access
+  testLinkedIn: () => api.get("/recruiters/linkedin/test"),
+  fetchLinkedInInbox: (count?: number) =>
+    api.get("/recruiters/linkedin/inbox", { params: { count: count || 5 } }),
+};
+
+// ---------- Trash ----------
+export const trashApi = {
+  list: (params?: { item_type?: string; skip?: number; limit?: number }) =>
+    api.get("/trash", { params }),
+  restore: (itemType: string, itemId: string) =>
+    api.post(`/trash/${itemType}/${itemId}/restore`),
+  permanentDelete: (itemType: string, itemId: string) =>
+    api.delete(`/trash/${itemType}/${itemId}`),
+  empty: () => api.delete("/trash"),
 };
 
 export default api;

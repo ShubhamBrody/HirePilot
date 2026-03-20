@@ -67,6 +67,8 @@ class JobMatchScoreResponse(BaseModel):
     reasoning: str
     matched_skills: list[str]
     missing_skills: list[str]
+    strengths: list[str] = []
+    weaknesses: list[str] = []
     recommendations: list[str]
 
 
@@ -74,3 +76,18 @@ class TriggerJobSearchRequest(BaseModel):
     """Trigger an async job search with given filters."""
     filters: JobSearchFilters
     sources: list[JobSource] = [JobSource.LINKEDIN, JobSource.INDEED]
+
+
+# ── Manual Job URL Scraping ──────────────────────────────────────
+
+
+class ScrapeJobURLRequest(BaseModel):
+    """User submits a job URL to scrape and analyze."""
+    url: str
+    resume_id: str | None = Field(None, description="Resume to compare against for fit scoring")
+
+
+class ScrapeJobURLResponse(BaseModel):
+    job: JobListingResponse | None = None
+    fit_analysis: JobMatchScoreResponse | None = None
+    error: str | None = None

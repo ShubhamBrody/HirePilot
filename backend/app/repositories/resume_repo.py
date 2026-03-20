@@ -4,7 +4,7 @@ Resume Repository
 
 import uuid
 
-from sqlalchemy import desc, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.resume import ResumeVersion, ResumeTemplate
@@ -16,16 +16,17 @@ class ResumeRepository(BaseRepository[ResumeVersion]):
         super().__init__(ResumeVersion, session)
 
     async def get_user_resumes(
-        self, user_id: uuid.UUID, *, skip: int = 0, limit: int = 50
+        self, user_id: uuid.UUID, *, skip: int = 0, limit: int = 50, include_tailored: bool = False
     ) -> list[ResumeVersion]:
-        """Get all resume versions for a user."""
+        """Get all resume versions for a user. Excludes AI-tailored by default."""
         query = (
             select(ResumeVersion)
             .where(ResumeVersion.user_id == user_id)
-            .order_by(desc(ResumeVersion.updated_at))
-            .offset(skip)
-            .limit(limit)
+            .where(ResumeVersion.deleted_at.is_(None))
         )
+        if not include_tailored:
+            query = query.where(ResumeVersion.ai_tailored.is_(False))
+        query = query.order_by(desc(ResumeVersion.updated_at)).offset(skip).limit(limit)
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
@@ -34,6 +35,7 @@ class ResumeRepository(BaseRepository[ResumeVersion]):
         query = (
             select(ResumeVersion)
             .where(ResumeVersion.user_id == user_id)
+            .where(ResumeVersion.deleted_at.is_(None))
             .where(ResumeVersion.is_master.is_(True))
             .order_by(desc(ResumeVersion.updated_at))
             .limit(1)
@@ -53,8 +55,17 @@ class ResumeRepository(BaseRepository[ResumeVersion]):
         current = result.scalar_one_or_none()
         return (current or 0) + 1
 
-    async def count_user_resumes(self, user_id: uuid.UUID) -> int:
-        return await self.count({"user_id": user_id})
+    async def count_user_resumes(self, user_id: uuid.UUID, include_tailored: bool = False) -> int:
+        query = (
+            select(func.count())
+            .select_from(ResumeVersion)
+            .where(ResumeVersion.user_id == user_id)
+            .where(ResumeVersion.deleted_at.is_(None))
+        )
+        if not include_tailored:
+            query = query.where(ResumeVersion.ai_tailored.is_(False))
+        result = await self.session.execute(query)
+        return result.scalar_one()
 
 
 class ResumeTemplateRepository(BaseRepository[ResumeTemplate]):

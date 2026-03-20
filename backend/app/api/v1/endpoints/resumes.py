@@ -1,6 +1,9 @@
 """
-Resume Endpoints — CRUD, compilation, tailoring, templates.
+Resume Endpoints — CRUD, compilation, tailoring, templates, AI chat, parsing, diff, rollback.
 """
+
+import json
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import Response
@@ -9,21 +12,31 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import get_current_user_id
-from app.repositories.resume_repo import ResumeTemplateRepository
+from app.repositories.resume_repo import ResumeRepository, ResumeTemplateRepository
+from app.repositories.job_repo import JobRepository
 from app.schemas.resume import (
+    ResumeChatRequest,
+    ResumeChatResponse,
     ResumeCompileResponse,
     ResumeListResponse,
+    ResumeParseResponse,
+    ResumeRollbackRequest,
     ResumeTemplateResponse,
     ResumeTailorRequest,
     ResumeTailorResponse,
     ResumeVersionCreateRequest,
     ResumeVersionResponse,
     ResumeVersionUpdateRequest,
+    VersionDiffResponse,
 )
 from app.services.latex_compiler import LatexCompilerService
+from app.services.llm_service import LLMService
 from app.services.resume_service import ResumeService
 
 router = APIRouter()
+
+
+# ── CRUD ────────────────────────────────────────────────────────
 
 
 @router.get("", response_model=ResumeListResponse)
@@ -71,6 +84,9 @@ async def list_templates(db: AsyncSession = Depends(get_db)):
     return [ResumeTemplateResponse.model_validate(t) for t in templates]
 
 
+# ── Compile ─────────────────────────────────────────────────────
+
+
 class CompilePreviewRequest(BaseModel):
     latex_source: str
 
@@ -80,10 +96,7 @@ async def compile_preview(
     data: CompilePreviewRequest,
     user_id: str = Depends(get_current_user_id),  # noqa: ARG001
 ):
-    """
-    Compile LaTeX source on-the-fly and return the PDF as bytes.
-    Used for the live preview panel.
-    """
+    """Compile LaTeX source on-the-fly and return the PDF as bytes."""
     if not data.latex_source or not data.latex_source.strip():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -107,6 +120,279 @@ async def compile_preview(
         media_type="application/pdf",
         headers={"Content-Disposition": "inline; filename=preview.pdf"},
     )
+
+
+# ── AI Tailor (wired to Ollama) ─────────────────────────────────
+
+
+@router.post("/tailor", response_model=ResumeTailorResponse)
+async def tailor_resume(
+    data: ResumeTailorRequest,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    AI-tailor a resume for a specific job description.
+    Uses Ollama LLM to generate an optimized version.
+    """
+    resume_repo = ResumeRepository(db)
+    job_repo = JobRepository(db)
+    llm = LLMService()
+
+    # Load base resume (or master)
+    if data.base_resume_id:
+        source_resume = await resume_repo.get_by_id(uuid.UUID(data.base_resume_id))
+    else:
+        source_resume = await resume_repo.get_master_resume(uuid.UUID(user_id))
+    if not source_resume:
+        raise HTTPException(status_code=404, detail="No base resume found")
+
+    # Load job
+    job = await job_repo.get_by_id(uuid.UUID(data.job_listing_id))
+    if not job:
+        raise HTTPException(status_code=404, detail="Job listing not found")
+
+    # AI tailoring via Ollama
+    tailor_result = await llm.tailor_resume(
+        master_latex=source_resume.latex_source,
+        job_description=job.description,
+        company=job.company,
+        role=job.title,
+    )
+    tailored_latex = tailor_result.get("tailored_latex", source_resume.latex_source)
+
+    # Generate changes summary
+    changes = await llm.generate_changes_summary(source_resume.latex_source, tailored_latex)
+
+    # Create new resume version
+    from app.models.resume import ResumeVersion
+    next_version = await resume_repo.get_next_version_number(uuid.UUID(user_id))
+    new_version = ResumeVersion(
+        user_id=uuid.UUID(user_id),
+        name=f"Tailored for {job.title} @ {job.company}",
+        latex_source=tailored_latex,
+        is_master=False,
+        version_number=next_version,
+        tailored_for_job_id=job.id,
+        ai_tailored=True,
+        ai_changes_summary=changes.get("changes_summary", ""),
+        target_company=job.company,
+        target_role=job.title,
+    )
+    created = await resume_repo.create(new_version)
+    await db.commit()
+
+    return ResumeTailorResponse(
+        resume_version_id=str(created.id),
+        name=created.name,
+        changes_summary=changes.get("changes_summary", ""),
+        matched_keywords=changes.get("keywords_added", []),
+        optimization_score=changes.get("optimization_score", 0.0),
+    )
+
+
+# ── ATS Scoring ─────────────────────────────────────────────────
+
+
+class ATSScoreRequest(BaseModel):
+    resume_id: str | None = None  # If None, uses master resume
+    job_id: str | None = None
+    job_description: str | None = None  # Direct JD text, alternative to job_id
+
+
+class ATSScoreResponse(BaseModel):
+    overall_score: int = 0
+    breakdown: dict = {}
+    matched_keywords: list[str] = []
+    missing_keywords: list[str] = []
+    strengths: list[str] = []
+    weaknesses: list[str] = []
+    suggestions: list[str] = []
+    summary: str = ""
+
+
+@router.post("/ats-score", response_model=ATSScoreResponse)
+async def score_resume_ats(
+    data: ATSScoreRequest,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Score a resume against a job description for ATS compatibility.
+    Returns a 0-100 score with breakdown and suggestions.
+    """
+    from app.agents.ats_scoring_agent import ATSScoringAgent
+    from app.agents.base import AgentContext
+
+    agent = ATSScoringAgent()
+    context = AgentContext(
+        user_id=user_id,
+        params={
+            "resume_id": data.resume_id,
+            "job_id": data.job_id,
+            "job_description": data.job_description,
+        },
+        db_session=db,
+        llm_service=LLMService(),
+    )
+
+    result = await agent.run(context)
+
+    if not result.success:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=result.errors[0] if result.errors else "ATS scoring failed",
+        )
+
+    return ATSScoreResponse(
+        overall_score=result.data.get("overall_score", 0),
+        breakdown=result.data.get("breakdown", {}),
+        matched_keywords=result.data.get("matched_keywords", []),
+        missing_keywords=result.data.get("missing_keywords", []),
+        strengths=result.data.get("strengths", []),
+        weaknesses=result.data.get("weaknesses", []),
+        suggestions=result.data.get("suggestions", []),
+        summary=result.data.get("summary", ""),
+    )
+
+
+# ── AI Chat ─────────────────────────────────────────────────────
+
+
+@router.post("/chat", response_model=ResumeChatResponse)
+async def resume_chat(
+    data: ResumeChatRequest,
+    user_id: str = Depends(get_current_user_id),  # noqa: ARG001
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    AI chat interface for the resume editor.
+    User sends a message; AI returns updated LaTeX + explanation.
+    """
+    resume_repo = ResumeRepository(db)
+    resume = await resume_repo.get_by_id(uuid.UUID(data.resume_id))
+    if not resume:
+        raise HTTPException(status_code=404, detail="Resume not found")
+
+    llm = LLMService()
+    result = await llm.chat_resume(
+        resume_latex=resume.latex_source,
+        user_message=data.message,
+        history=data.history,
+    )
+
+    updated_latex = result.get("updated_latex")
+    explanation = result.get("explanation", "No changes made.")
+
+    # If AI returned updated LaTeX, save it
+    if updated_latex and updated_latex.strip():
+        resume.latex_source = updated_latex
+        await db.commit()
+
+    return ResumeChatResponse(
+        updated_latex=updated_latex,
+        explanation=explanation,
+    )
+
+
+# ── Resume Parsing ──────────────────────────────────────────────
+
+
+@router.post("/{resume_id}/parse", response_model=ResumeParseResponse)
+async def parse_resume(
+    resume_id: str,
+    user_id: str = Depends(get_current_user_id),  # noqa: ARG001
+    db: AsyncSession = Depends(get_db),
+):
+    """Parse a resume into structured sections using AI."""
+    resume_repo = ResumeRepository(db)
+    resume = await resume_repo.get_by_id(uuid.UUID(resume_id))
+    if not resume:
+        raise HTTPException(status_code=404, detail="Resume not found")
+
+    llm = LLMService()
+    parsed = await llm.parse_resume(resume.latex_source)
+
+    # Store parsed sections on the resume
+    resume.parsed_sections = json.dumps(parsed)
+    await db.commit()
+
+    return ResumeParseResponse(
+        resume_id=str(resume.id),
+        parsed_sections=parsed,
+    )
+
+
+# ── Version Diff ────────────────────────────────────────────────
+
+
+@router.get("/diff/{version_a_id}/{version_b_id}", response_model=VersionDiffResponse)
+async def diff_versions(
+    version_a_id: str,
+    version_b_id: str,
+    user_id: str = Depends(get_current_user_id),  # noqa: ARG001
+    db: AsyncSession = Depends(get_db),
+):
+    """Compare two resume versions using AI and return a summary of changes."""
+    resume_repo = ResumeRepository(db)
+    version_a = await resume_repo.get_by_id(uuid.UUID(version_a_id))
+    version_b = await resume_repo.get_by_id(uuid.UUID(version_b_id))
+    if not version_a or not version_b:
+        raise HTTPException(status_code=404, detail="One or both versions not found")
+
+    llm = LLMService()
+    diff = await llm.generate_changes_summary(version_a.latex_source, version_b.latex_source)
+
+    return VersionDiffResponse(
+        version_a_id=version_a_id,
+        version_b_id=version_b_id,
+        changes_summary=diff.get("changes_summary", ""),
+        sections_modified=diff.get("sections_modified", []),
+        keywords_added=diff.get("keywords_added", []),
+        optimization_score=diff.get("optimization_score", 0.0),
+    )
+
+
+# ── Rollback ────────────────────────────────────────────────────
+
+
+@router.post("/rollback", response_model=ResumeVersionResponse)
+async def rollback_resume(
+    data: ResumeRollbackRequest,
+    user_id: str = Depends(get_current_user_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Rollback to a previous resume version by creating a new version
+    with the content of the target version.
+    """
+    resume_repo = ResumeRepository(db)
+    target = await resume_repo.get_by_id(uuid.UUID(data.target_version_id))
+    if not target:
+        raise HTTPException(status_code=404, detail="Target version not found")
+
+    from app.models.resume import ResumeVersion
+    next_version = await resume_repo.get_next_version_number(uuid.UUID(user_id))
+    rollback_version = ResumeVersion(
+        user_id=uuid.UUID(user_id),
+        name=f"Rollback to v{target.version_number}",
+        description=f"Rolled back from v{target.version_number}: {target.name}",
+        latex_source=target.latex_source,
+        version_number=next_version,
+        is_master=target.is_master,
+        target_company=target.target_company,
+        target_role=target.target_role,
+        focus_area=target.focus_area,
+        technologies=target.technologies,
+        parsed_sections=target.parsed_sections,
+    )
+    created = await resume_repo.create(rollback_version)
+    await db.commit()
+
+    return ResumeVersionResponse.model_validate(created)
+
+
+# ── Single Resume CRUD ──────────────────────────────────────────
 
 
 @router.get("/{resume_id}", response_model=ResumeVersionResponse)
@@ -164,26 +450,3 @@ async def compile_resume(
         return await service.compile_resume(resume_id)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
-
-@router.post("/tailor", response_model=ResumeTailorResponse, status_code=status.HTTP_202_ACCEPTED)
-async def tailor_resume(
-    data: ResumeTailorRequest,
-    user_id: str = Depends(get_current_user_id),  # noqa: ARG001
-    db: AsyncSession = Depends(get_db),  # noqa: ARG001
-):
-    """
-    AI-tailor a resume for a specific job description.
-    Returns a new resume version optimized for ATS.
-    In production: dispatches Celery AI task.
-    """
-    # In production:
-    # from app.tasks.ai_tasks import tailor_resume_task
-    # task = tailor_resume_task.delay(user_id, data.model_dump())
-    return ResumeTailorResponse(
-        resume_version_id="pending",
-        name=f"Tailored for job {data.job_listing_id}",
-        changes_summary="AI tailoring task queued",
-        matched_keywords=[],
-        optimization_score=0.0,
-    )

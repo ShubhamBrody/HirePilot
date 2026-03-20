@@ -1,8 +1,9 @@
 """
-Resume Schemas — Resume version CRUD, tailoring requests, compilation.
+Resume Schemas — Resume version CRUD, tailoring, compilation, chat, parsing.
 """
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -45,6 +46,7 @@ class ResumeVersionResponse(BaseModel):
     technologies: str | None = None
     ai_tailored: bool
     ai_changes_summary: str | None = None
+    parsed_sections: str | None = None
     is_master: bool
     created_at: datetime
     updated_at: datetime
@@ -106,3 +108,43 @@ class ResumeTemplateResponse(BaseModel):
     @classmethod
     def coerce_id_to_str(cls, v: object) -> str:
         return str(v)
+
+
+# ── AI Chat ─────────────────────────────────────────────────────
+
+class ResumeChatRequest(BaseModel):
+    """User message in the resume AI chat."""
+    resume_id: str
+    message: str
+    history: list[dict[str, str]] | None = Field(
+        None, description="Previous chat turns [{role, content}, ...]"
+    )
+
+
+class ResumeChatResponse(BaseModel):
+    updated_latex: str | None = None
+    explanation: str
+
+
+# ── Resume Parsing ──────────────────────────────────────────────
+
+class ResumeParseResponse(BaseModel):
+    resume_id: str
+    parsed_sections: dict[str, Any]
+
+
+# ── Version Diff ────────────────────────────────────────────────
+
+class VersionDiffResponse(BaseModel):
+    version_a_id: str
+    version_b_id: str
+    changes_summary: str
+    sections_modified: list[str]
+    keywords_added: list[str]
+    optimization_score: float
+
+
+# ── Rollback ────────────────────────────────────────────────────
+
+class ResumeRollbackRequest(BaseModel):
+    target_version_id: str

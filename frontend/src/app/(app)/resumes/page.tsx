@@ -16,6 +16,11 @@ import {
   FiFileText,
   FiChevronLeft,
   FiChevronRight,
+  FiMessageSquare,
+  FiRotateCcw,
+  FiCpu,
+  FiSend,
+  FiX,
 } from "react-icons/fi";
 import { resumesApi } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
@@ -43,7 +48,13 @@ interface Resume {
   latex_source: string;
   pdf_s3_key: string | null;
   compilation_status: string;
+  parsed_sections: string | null;
   created_at: string;
+}
+
+interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
 }
 
 type ViewMode = "split" | "editor" | "preview";
@@ -69,6 +80,20 @@ export default function ResumesPage() {
   const [sidebarHover, setSidebarHover] = useState(false);
   const sidebarOpen = sidebarPinned || sidebarHover;
 
+  // AI Chat state
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Parse state
+  const [parsing, setParsing] = useState(false);
+  const [parsedSections, setParsedSections] = useState<Record<string, string> | null>(null);
+
+  // Rollback state
+  const [rollingBack, setRollingBack] = useState<string | null>(null);
+
   const loadResumes = useCallback(async () => {
     try {
       setLoading(true);
@@ -92,11 +117,37 @@ export default function ResumesPage() {
     };
   }, []);
 
+  // Auto-scroll chat
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatMessages]);
+
   const selectResume = (resume: Resume) => {
     setSelected(resume);
     setEditorContent(resume.latex_source);
     setPdfUrl(null);
     setCompileErrors([]);
+    setParsedSections(null);
+    setChatMessages([]);
+    // Auto-compile to show PDF preview immediately
+    autoCompile(resume.latex_source);
+  };
+
+  const autoCompile = async (latex: string) => {
+    if (!latex.trim()) return;
+    setCompiling(true);
+    setCompileErrors([]);
+    try {
+      const { data } = await resumesApi.compilePreview(latex);
+      if (prevPdfUrl.current) URL.revokeObjectURL(prevPdfUrl.current);
+      const url = URL.createObjectURL(data);
+      prevPdfUrl.current = url;
+      setPdfUrl(url);
+    } catch {
+      // Silent fail on auto-compile — user can always manually recompile
+    } finally {
+      setCompiling(false);
+    }
   };
 
   const handleSave = async () => {
@@ -187,6 +238,66 @@ export default function ResumesPage() {
       loadResumes();
     } catch {
       toast.error("Failed to delete");
+    }
+  };
+
+  // ── AI Chat ──
+  const handleChatSend = async () => {
+    if (!selected || !chatInput.trim()) return;
+    const userMsg = chatInput.trim();
+    setChatInput("");
+    setChatMessages((prev) => [...prev, { role: "user", content: userMsg }]);
+    setChatLoading(true);
+    try {
+      const { data } = await resumesApi.chat({
+        resume_id: selected.id,
+        message: userMsg,
+      });
+      setChatMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: data.explanation || data.message || "Done." },
+      ]);
+      if (data.updated_latex) {
+        setEditorContent(data.updated_latex);
+        toast.success("LaTeX updated by AI");
+      }
+    } catch {
+      setChatMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: "Sorry, something went wrong." },
+      ]);
+    } finally {
+      setChatLoading(false);
+    }
+  };
+
+  // ── Parse resume sections ──
+  const handleParse = async () => {
+    if (!selected) return;
+    setParsing(true);
+    try {
+      const { data } = await resumesApi.parse(selected.id);
+      setParsedSections(data.sections || {});
+      toast.success("Resume parsed into sections");
+    } catch {
+      toast.error("Failed to parse resume");
+    } finally {
+      setParsing(false);
+    }
+  };
+
+  // ── Rollback to a version ──
+  const handleRollback = async (targetId: string) => {
+    if (!confirm("Rollback to this version? A new version will be created from it.")) return;
+    setRollingBack(targetId);
+    try {
+      await resumesApi.rollback({ target_version_id: targetId });
+      toast.success("Rolled back successfully");
+      await loadResumes();
+    } catch {
+      toast.error("Failed to rollback");
+    } finally {
+      setRollingBack(null);
     }
   };
 
@@ -299,15 +410,34 @@ export default function ResumesPage() {
                       <span className="text-[10px] text-[var(--muted-foreground)]">
                         {formatDate(r.created_at)}
                       </span>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDelete(r.id);
-                        }}
-                        className="text-[var(--muted-foreground)] hover:text-red-500 transition-colors"
-                      >
-                        <FiTrash2 className="h-3 w-3" />
-                      </button>
+                      <div className="flex items-center gap-1">
+                        {selected?.id !== r.id && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRollback(r.id);
+                            }}
+                            disabled={rollingBack === r.id}
+                            className="text-[var(--muted-foreground)] hover:text-blue-500 transition-colors"
+                            title="Rollback to this version"
+                          >
+                            {rollingBack === r.id ? (
+                              <FiLoader className="h-3 w-3 animate-spin" />
+                            ) : (
+                              <FiRotateCcw className="h-3 w-3" />
+                            )}
+                          </button>
+                        )}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDelete(r.id);
+                          }}
+                          className="text-[var(--muted-foreground)] hover:text-red-500 transition-colors"
+                        >
+                          <FiTrash2 className="h-3 w-3" />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))
@@ -397,6 +527,31 @@ export default function ResumesPage() {
                 </button>
               </div>
 
+              {/* Parse button */}
+              <button
+                onClick={handleParse}
+                disabled={parsing}
+                className="btn-secondary flex items-center gap-1 text-xs"
+                title="AI Parse — extract resume sections"
+              >
+                <FiCpu className="h-3.5 w-3.5" />
+                {parsing ? "Parsing..." : "Parse"}
+              </button>
+
+              {/* AI Chat toggle */}
+              <button
+                onClick={() => setChatOpen(!chatOpen)}
+                className={`flex items-center gap-1 text-xs font-medium px-3 py-1.5 rounded-lg transition-colors ${
+                  chatOpen
+                    ? "bg-purple-600 text-white"
+                    : "bg-purple-600/20 text-purple-400 hover:bg-purple-600/30"
+                }`}
+                title="Toggle AI Chat"
+              >
+                <FiMessageSquare className="h-3.5 w-3.5" />
+                AI Chat
+              </button>
+
               {/* Recompile button */}
               <button
                 onClick={handleCompilePreview}
@@ -438,13 +593,16 @@ export default function ResumesPage() {
             </div>
           </div>
 
-          {/* Editor + Preview panels */}
+          {/* Editor + Preview + Chat panels */}
           <div className="flex-1 flex min-h-0">
             {/* Code Editor Panel */}
             {showEditor && (
               <div
                 className={`flex flex-col min-w-0 ${
-                  showPreview ? "w-1/2 border-r border-[var(--border)]" : "w-full"
+                  showPreview && !chatOpen ? "w-1/2 border-r border-[var(--border)]"
+                  : showPreview && chatOpen ? "w-1/3 border-r border-[var(--border)]"
+                  : chatOpen ? "flex-1 border-r border-[var(--border)]"
+                  : "w-full"
                 }`}
               >
                 {/* Editor tab bar */}
@@ -485,7 +643,10 @@ export default function ResumesPage() {
             {showPreview && (
               <div
                 className={`flex flex-col bg-gray-100 dark:bg-neutral-800 min-w-0 ${
-                  showEditor ? "w-1/2" : "w-full"
+                  showEditor && !chatOpen ? "w-1/2"
+                  : showEditor && chatOpen ? "w-1/3"
+                  : chatOpen ? "flex-1"
+                  : "w-full"
                 }`}
               >
                 {/* Preview tab bar */}
@@ -552,7 +713,126 @@ export default function ResumesPage() {
                 </div>
               </div>
             )}
+
+            {/* AI Chat Panel */}
+            {chatOpen && (
+              <div className="w-80 shrink-0 border-l border-[var(--border)] bg-[var(--card)] flex flex-col">
+                {/* Chat header */}
+                <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--border)]">
+                  <span className="text-xs font-semibold text-[var(--foreground)] flex items-center gap-1.5">
+                    <FiMessageSquare className="h-3.5 w-3.5 text-purple-500" />
+                    AI Resume Assistant
+                  </span>
+                  <button
+                    onClick={() => setChatOpen(false)}
+                    className="text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+                  >
+                    <FiX className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+
+                {/* Chat messages */}
+                <div className="flex-1 overflow-y-auto p-3 space-y-3">
+                  {chatMessages.length === 0 && (
+                    <div className="text-center py-8">
+                      <FiMessageSquare className="h-8 w-8 mx-auto text-purple-500/30 mb-2" />
+                      <p className="text-xs text-[var(--muted-foreground)]">
+                        Ask the AI to modify your resume. For example:
+                      </p>
+                      <div className="mt-2 space-y-1">
+                        {[
+                          "Add a skills section for Python and React",
+                          "Make my experience bullets more impactful",
+                          "Tailor this for a ML Engineer role",
+                        ].map((hint) => (
+                          <button
+                            key={hint}
+                            onClick={() => setChatInput(hint)}
+                            className="block w-full text-left text-[10px] text-purple-400 hover:text-purple-300 px-2 py-1 rounded hover:bg-purple-500/10 transition-colors"
+                          >
+                            &quot;{hint}&quot;
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {chatMessages.map((msg, i) => (
+                    <div
+                      key={i}
+                      className={`text-xs rounded-lg p-2.5 ${
+                        msg.role === "user"
+                          ? "bg-brand-500/10 text-[var(--foreground)] ml-4"
+                          : "bg-purple-500/10 text-[var(--foreground)] mr-4"
+                      }`}
+                    >
+                      <span className="font-semibold text-[10px] block mb-1 opacity-60">
+                        {msg.role === "user" ? "You" : "AI"}
+                      </span>
+                      <p className="whitespace-pre-wrap">{msg.content}</p>
+                    </div>
+                  ))}
+                  {chatLoading && (
+                    <div className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
+                      <FiLoader className="h-3 w-3 animate-spin" />
+                      AI is thinking...
+                    </div>
+                  )}
+                  <div ref={chatEndRef} />
+                </div>
+
+                {/* Chat input */}
+                <div className="p-2 border-t border-[var(--border)]">
+                  <div className="flex gap-1.5">
+                    <input
+                      type="text"
+                      placeholder="Ask AI to modify your resume..."
+                      value={chatInput}
+                      onChange={(e) => setChatInput(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleChatSend()}
+                      disabled={chatLoading}
+                      className="input text-xs flex-1"
+                    />
+                    <button
+                      onClick={handleChatSend}
+                      disabled={chatLoading || !chatInput.trim()}
+                      className="btn-primary p-1.5"
+                    >
+                      <FiSend className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
+
+          {/* Parsed Sections panel (slides in from bottom when parsed) */}
+          {parsedSections && (
+            <div className="border-t border-[var(--border)] bg-[var(--card)] max-h-48 overflow-y-auto p-3">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-xs font-semibold text-[var(--foreground)]">
+                  Parsed Resume Sections
+                </h3>
+                <button
+                  onClick={() => setParsedSections(null)}
+                  className="text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+                >
+                  <FiX className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {Object.entries(parsedSections).map(([key, val]) => (
+                  <div key={key} className="rounded border border-[var(--border)] p-2">
+                    <h4 className="text-[10px] font-bold text-brand-500 uppercase mb-1">
+                      {key.replace(/_/g, " ")}
+                    </h4>
+                    <p className="text-[10px] text-[var(--foreground)] line-clamp-3 whitespace-pre-wrap">
+                      {val}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <div className="flex-1 flex items-center justify-center text-[var(--muted-foreground)]">
