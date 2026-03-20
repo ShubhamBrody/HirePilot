@@ -28,12 +28,14 @@ for maximum ATS compatibility and recruiter appeal.
 Critical rules:
 1. NEVER fabricate experience, skills, or achievements
 2. NEVER change dates, company names, or educational credentials
-3. Only reword existing experience to better match job requirements
-4. Highlight relevant skills that the candidate actually has
-5. Reorder sections to put the most relevant experience first
-6. Use keywords from the job description naturally in bullet points
-7. Quantify achievements where the original resume provides data
-8. Maintain the candidate's voice and authenticity
+3. NEVER invent statistics, metrics, or accomplishments not present in the original
+4. Only reword existing experience to better match job requirements
+5. Highlight relevant skills that the candidate actually has
+6. Reorder sections to put the most relevant experience first
+7. Use keywords from the job description naturally in bullet points
+8. Quantify achievements ONLY where the original resume already provides data
+9. Maintain the candidate's voice and authenticity
+10. When in doubt, keep the original wording rather than risk fabrication
 """
 
 JD_ANALYSIS_PROMPT = """Analyze this job description and extract structured information.
@@ -72,9 +74,17 @@ Instructions:
 2. Reorder experience sections to highlight the most relevant work first
 3. Emphasize matching skills in the skills section
 4. Adjust the professional summary (if present) to align with the role
-5. Keep all factual information (dates, companies, degrees) unchanged
-6. Ensure the LaTeX compiles correctly — don't break formatting
-7. Add any skills the candidate has that match the JD keywords
+5. Keep ALL factual information unchanged: dates, company names, job titles, degrees, GPAs, certifications
+6. NEVER fabricate statistics, metrics, or accomplishments not in the original
+7. Add any skills the candidate actually has that match the JD keywords
+8. When in doubt, keep the original wording
+
+LATEX RULES:
+- Preserve the exact \\documentclass line and all \\usepackage declarations from the original
+- Ensure every \\begin{{...}} has a matching \\end{{...}}
+- Escape special characters: %, $, &, #, _ must be \\%, \\$, \\&, \\#, \\_
+- Start with \\documentclass and end with \\end{{document}}
+- Do NOT add new packages not present in the original
 
 Return ONLY the complete tailored LaTeX source code.
 Do NOT include markdown code blocks or explanations.
