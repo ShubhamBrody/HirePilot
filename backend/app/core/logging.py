@@ -3,14 +3,21 @@ Structured Logging Configuration
 
 Uses structlog for structured, JSON-formatted logging in production
 and human-readable colored output in development.
+Errors are also written to a persistent rotating log file.
 """
 
 import logging
+import logging.handlers
 import sys
+from pathlib import Path
 
 import structlog
 
 from app.core.config import get_settings
+
+# Persistent error log directory (Docker volume mounted)
+ERROR_LOG_DIR = Path("/app/logs")
+ERROR_LOG_FILE = ERROR_LOG_DIR / "errors.log"
 
 
 def setup_logging() -> None:
@@ -48,6 +55,27 @@ def setup_logging() -> None:
         stream=sys.stdout,
         level=log_level,
     )
+
+    # ── Persistent error file handler ────────────────────────────
+    try:
+        ERROR_LOG_DIR.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.handlers.RotatingFileHandler(
+            ERROR_LOG_FILE,
+            maxBytes=5 * 1024 * 1024,  # 5 MB
+            backupCount=3,
+            encoding="utf-8",
+        )
+        file_handler.setLevel(logging.ERROR)
+        file_handler.setFormatter(
+            logging.Formatter(
+                "%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
+            )
+        )
+        logging.getLogger().addHandler(file_handler)
+    except OSError:
+        # Container may not have /app/logs mounted — skip silently
+        pass
 
     # Reduce noise from third-party libraries
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
