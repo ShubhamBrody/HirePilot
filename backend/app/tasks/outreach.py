@@ -6,6 +6,7 @@ connection requests, InMails, and follow-ups.
 """
 
 import asyncio
+import json
 from datetime import datetime, timedelta, UTC
 from typing import Any
 from uuid import UUID
@@ -15,7 +16,7 @@ from app.core.database import async_session_factory
 from app.core.logging import get_logger
 from app.services.messaging_agent import MessageGeneratorService, MessageSenderService
 from app.services.recruiter_finder import RecruiterFinderService
-from app.repositories.recruiter_repo import RecruiterRepository
+from app.repositories.recruiter_repo import RecruiterRepository, OutreachMessageRepository
 from app.repositories.user_repo import UserRepository
 from app.repositories.audit_repo import AuditLogRepository
 
@@ -53,31 +54,30 @@ def find_recruiters(
             user_repo = UserRepository(session)
             audit_repo = AuditLogRepository(session)
 
-            user = await user_repo.get(UUID(user_id))
+            user = await user_repo.get_by_id(UUID(user_id))
             if not user:
                 return {"error": "User not found"}
 
             # Decrypt LinkedIn credentials
             from app.core.security import decrypt_credential
-            import json
             creds = {}
-            if user.encrypted_platform_credentials:
-                creds = json.loads(decrypt_credential(user.encrypted_platform_credentials))
+            if user.encrypted_linkedin_creds:
+                creds = json.loads(decrypt_credential(user.encrypted_linkedin_creds))
 
             finder = RecruiterFinderService()
             profiles = await finder.find_recruiters(
                 company=company,
                 role=role,
-                linkedin_credentials=creds.get("linkedin"),
+                user_id=user_id,
             )
 
             saved = 0
             for profile in profiles:
-                existing = await recruiter_repo.find_by_linkedin_url(
-                    profile.get("linkedin_url", "")
-                )
-                if existing:
-                    continue
+                linkedin_url = profile.get("linkedin_url", "")
+                if linkedin_url:
+                    existing = await recruiter_repo.get_by_linkedin_url(linkedin_url)
+                    if existing:
+                        continue
 
                 from app.models.recruiter import Recruiter, ConnectionStatus
                 recruiter = Recruiter(
@@ -85,7 +85,7 @@ def find_recruiters(
                     name=profile.get("name", ""),
                     title=profile.get("title", ""),
                     company=company,
-                    linkedin_url=profile.get("linkedin_url", ""),
+                    linkedin_url=linkedin_url,
                     connection_status=ConnectionStatus.NOT_CONNECTED,
                 )
                 session.add(recruiter)
@@ -96,8 +96,9 @@ def find_recruiters(
             await audit_repo.log_action(
                 user_id=UUID(user_id),
                 action="find_recruiters",
-                resource_type="recruiter",
-                details={"company": company, "found": len(profiles), "new_saved": saved},
+                module="outreach",
+                entity_type="recruiter",
+                details=json.dumps({"company": company, "found": len(profiles), "new_saved": saved}),
             )
             await session.commit()
 
@@ -132,8 +133,8 @@ def send_connection_request(
             user_repo = UserRepository(session)
             audit_repo = AuditLogRepository(session)
 
-            user = await user_repo.get(UUID(user_id))
-            recruiter = await recruiter_repo.get(UUID(recruiter_id))
+            user = await user_repo.get_by_id(UUID(user_id))
+            recruiter = await recruiter_repo.get_by_id(UUID(recruiter_id))
 
             if not user or not recruiter:
                 return {"error": "User or recruiter not found"}
@@ -151,24 +152,24 @@ def send_connection_request(
 
             # Send via LinkedIn
             from app.core.security import decrypt_credential
-            import json
             creds = {}
-            if user.encrypted_platform_credentials:
-                creds = json.loads(decrypt_credential(user.encrypted_platform_credentials))
+            if user.encrypted_linkedin_creds:
+                creds = json.loads(decrypt_credential(user.encrypted_linkedin_creds))
 
             sender = MessageSenderService()
             result = await sender.send_connection_request(
                 profile_url=recruiter.linkedin_url,
                 message=message,
-                linkedin_credentials=creds.get("linkedin"),
+                linkedin_credentials=creds,
             )
 
             # Record outreach
             from app.models.recruiter import OutreachMessage, OutreachStatus, ConnectionStatus
             outreach = OutreachMessage(
+                user_id=UUID(user_id),
                 recruiter_id=recruiter.id,
                 message_type="connection_request",
-                content=message,
+                body=message,
                 status=OutreachStatus.SENT if result.get("success") else OutreachStatus.FAILED,
                 sent_at=datetime.now(UTC) if result.get("success") else None,
                 error_message=result.get("error"),
@@ -185,9 +186,10 @@ def send_connection_request(
             await audit_repo.log_action(
                 user_id=UUID(user_id),
                 action="send_connection_request",
-                resource_type="recruiter",
-                resource_id=recruiter.id,
-                details={"success": result.get("success", False)},
+                module="outreach",
+                entity_type="recruiter",
+                entity_id=str(recruiter.id),
+                details=json.dumps({"success": result.get("success", False)}),
             )
             await session.commit()
 
@@ -221,17 +223,18 @@ def send_followup_message(
     async def _followup():
         async with async_session_factory() as session:
             recruiter_repo = RecruiterRepository(session)
+            msg_repo = OutreachMessageRepository(session)
             user_repo = UserRepository(session)
 
-            user = await user_repo.get(UUID(user_id))
-            recruiter = await recruiter_repo.get(UUID(recruiter_id))
+            user = await user_repo.get_by_id(UUID(user_id))
+            recruiter = await recruiter_repo.get_by_id(UUID(recruiter_id))
 
             if not user or not recruiter:
                 return {"error": "User or recruiter not found"}
 
             # Get previous messages for context
-            previous = await recruiter_repo.get_outreach_messages(recruiter.id)
-            prev_contents = [m.content for m in previous if m.content]
+            previous = await msg_repo.get_messages_for_recruiter(recruiter.id)
+            prev_contents = [m.body for m in previous if m.body]
 
             generator = MessageGeneratorService()
             message = await generator.generate_followup(
@@ -243,23 +246,23 @@ def send_followup_message(
 
             # Send
             from app.core.security import decrypt_credential
-            import json
             creds = {}
-            if user.encrypted_platform_credentials:
-                creds = json.loads(decrypt_credential(user.encrypted_platform_credentials))
+            if user.encrypted_linkedin_creds:
+                creds = json.loads(decrypt_credential(user.encrypted_linkedin_creds))
 
             sender = MessageSenderService()
             result = await sender.send_direct_message(
                 profile_url=recruiter.linkedin_url,
                 message=message,
-                linkedin_credentials=creds.get("linkedin"),
+                linkedin_credentials=creds,
             )
 
             from app.models.recruiter import OutreachMessage, OutreachStatus
             outreach = OutreachMessage(
+                user_id=UUID(user_id),
                 recruiter_id=recruiter.id,
                 message_type="followup",
-                content=message,
+                body=message,
                 status=OutreachStatus.SENT if result.get("success") else OutreachStatus.FAILED,
                 sent_at=datetime.now(UTC) if result.get("success") else None,
             )

@@ -15,6 +15,7 @@ Tests the complete resume management lifecycle:
 """
 
 import uuid
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import AsyncClient
@@ -286,20 +287,38 @@ class TestResumeCompileFlow:
 class TestResumeTailorFlow:
     """AI resume tailoring E2E scenarios."""
 
-    async def test_tailor_resume_returns_202(
-        self, client: AsyncClient, auth_headers: dict[str, str]
+    async def test_tailor_resume_returns_result(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+        test_user: User,
+        factory,
     ):
-        """Scenario: Request resume tailoring → 202 accepted."""
-        response = await client.post(
-            "/api/v1/resumes/tailor",
-            headers=auth_headers,
-            json={
-                "job_listing_id": str(uuid.uuid4()),
-                "focus_skills": ["Python", "Microservices"],
-                "additional_instructions": "Emphasize leadership experience",
-            },
-        )
-        assert response.status_code == 202
+        """Scenario: Request resume tailoring with valid resume+job → success."""
+        resume = await factory.create_resume(db_session, test_user.id)
+        job = await factory.create_job(db_session, test_user.id)
+
+        with patch("app.api.v1.endpoints.resumes.LLMService") as MockLLM:
+            instance = MockLLM.return_value
+            instance.tailor_resume = AsyncMock(return_value={
+                "tailored_latex": r"\documentclass{article}\begin{document}Tailored\end{document}",
+            })
+            instance.generate_changes_summary = AsyncMock(return_value={
+                "changes_summary": "Added Python keywords",
+                "keywords_added": ["Python"],
+                "optimization_score": 0.85,
+            })
+            response = await client.post(
+                "/api/v1/resumes/tailor",
+                headers=auth_headers,
+                json={
+                    "base_resume_id": str(resume.id),
+                    "job_listing_id": str(job.id),
+                    "focus_skills": ["Python", "Microservices"],
+                },
+            )
+        assert response.status_code == 200
         data = response.json()
         assert "changes_summary" in data
 

@@ -13,6 +13,7 @@ Tests the complete recruiter discovery and outreach lifecycle:
 """
 
 import uuid
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import AsyncClient
@@ -200,11 +201,14 @@ class TestOutreachMessageFlow:
         recruiter = await factory.create_recruiter(
             db_session, test_user.id, name="AI Target"
         )
-        response = await client.post(
-            f"/api/v1/recruiters/{recruiter.id}/outreach",
-            headers=auth_headers,
-            json={"message_type": "inmail"},
-        )
+        with patch("app.api.v1.endpoints.recruiters.LLMService") as MockLLM:
+            instance = MockLLM.return_value
+            instance.generate = AsyncMock(return_value="Hi, I'd love to connect!")
+            response = await client.post(
+                f"/api/v1/recruiters/{recruiter.id}/outreach",
+                headers=auth_headers,
+                json={"message_type": "inmail"},
+            )
         assert response.status_code == 201
         data = response.json()
         assert data["ai_generated"] is True
@@ -344,15 +348,18 @@ class TestRecruiterFullLifecycle:
         recruiter_id = recruiters[0]["id"]
 
         # Step 3: Generate message preview
-        gen_resp = await client.post(
-            "/api/v1/recruiters/generate-message",
-            headers=auth_headers,
-            json={
-                "recruiter_id": recruiter_id,
-                "message_type": "connection_request",
-                "tone": "enthusiastic",
-            },
-        )
+        with patch("app.api.v1.endpoints.recruiters.LLMService") as MockLLM:
+            instance = MockLLM.return_value
+            instance.generate = AsyncMock(return_value="Excited to connect about opportunities at Airbnb!")
+            gen_resp = await client.post(
+                "/api/v1/recruiters/generate-message",
+                headers=auth_headers,
+                json={
+                    "recruiter_id": recruiter_id,
+                    "message_type": "connection_request",
+                    "tone": "enthusiastic",
+                },
+            )
         assert gen_resp.status_code == 200
         suggested = gen_resp.json()["suggested_message"]
 

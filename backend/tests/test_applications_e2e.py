@@ -442,3 +442,71 @@ class TestApplicationFullLifecycle:
         a_data = analytics.json()
         assert a_data["total_applications"] == 1
         assert a_data["interview_rate"] == 1.0
+
+
+class TestWizardApplyRouteOrdering:
+    """
+    Regression tests for route ordering bug:
+    POST /wizard/apply was being intercepted by /{application_id}/apply
+    because the dynamic route was defined first, causing 422 errors.
+    """
+
+    async def test_wizard_apply_route_not_hijacked_by_dynamic_route(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+    ):
+        """
+        POST /wizard/apply with WizardAutoApplyRequest body must NOT
+        be matched by /{application_id}/apply (which expects AutoApplyRequest).
+        A 422 here means the dynamic route intercepted the request.
+        """
+        app_id = str(uuid.uuid4())
+        response = await client.post(
+            "/api/v1/applications/wizard/apply",
+            headers=auth_headers,
+            json={"application_id": app_id},
+        )
+        # Must NOT be 422 — that would mean the wrong route matched
+        assert response.status_code != 422, (
+            "wizard/apply was intercepted by /{application_id}/apply route; "
+            "check that /wizard/apply is defined BEFORE dynamic path routes"
+        )
+        # The endpoint should be reached (200 from the wizard handler).
+        # It may fail with a Celery error in test, but the route itself is hit.
+        assert response.status_code == 200
+        data = response.json()
+        assert data["application_id"] == app_id
+        assert "task_id" in data
+        assert data["step"] == "applying"
+
+    async def test_legacy_auto_apply_still_works(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+    ):
+        """Legacy /{application_id}/apply endpoint still functions after reorder."""
+        app_id = str(uuid.uuid4())
+        response = await client.post(
+            f"/api/v1/applications/{app_id}/apply",
+            headers=auth_headers,
+            json={
+                "job_listing_id": str(uuid.uuid4()),
+                "resume_version_id": str(uuid.uuid4()),
+            },
+        )
+        assert response.status_code == 202
+        data = response.json()
+        assert data["application_id"] == app_id
+        assert data["message"] == "Auto-apply task queued"
+
+    async def test_wizard_apply_unauthenticated_returns_401(
+        self,
+        client: AsyncClient,
+    ):
+        """POST /wizard/apply without auth token → 401, not 422."""
+        response = await client.post(
+            "/api/v1/applications/wizard/apply",
+            json={"application_id": str(uuid.uuid4())},
+        )
+        assert response.status_code == 401
