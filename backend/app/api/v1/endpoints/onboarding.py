@@ -23,9 +23,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.logging import get_logger
 from app.core.security import encrypt_credential, get_current_user_id
+from app.models.education import Education
 from app.models.resume import ResumeVersion
+from app.models.work_experience import WorkExperience
+from app.repositories.education_repo import EducationRepository
 from app.repositories.resume_repo import ResumeRepository
 from app.repositories.user_repo import UserRepository
+from app.repositories.work_experience_repo import WorkExperienceRepository
 from app.schemas.onboarding import (
     OnboardingProgressResponse,
     OnboardingStep1Request,
@@ -115,15 +119,37 @@ async def save_step_2(
     user_id: str = Depends(get_current_user_id),
     db: AsyncSession = Depends(get_db),
 ):
-    """Step 2: Work Experience."""
+    """Step 2: Work Experience — accepts multiple entries with is_current flag."""
     repo = UserRepository(db)
     user = await repo.get_by_id(uuid.UUID(user_id))
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
+    # Save structured work experiences to normalized table
+    exp_repo = WorkExperienceRepository(db)
+    await exp_repo.delete_all_for_user(uuid.UUID(user_id))
+    for i, exp in enumerate(data.experiences):
+        entry = WorkExperience(
+            user_id=uuid.UUID(user_id),
+            company=exp.company,
+            role=exp.role,
+            location=exp.location,
+            description=exp.description,
+            start_date=date.fromisoformat(exp.start_date) if exp.start_date else None,
+            end_date=date.fromisoformat(exp.end_date) if exp.end_date and not exp.is_current else None,
+            is_current=exp.is_current,
+            sort_order=i,
+        )
+        await exp_repo.create(entry)
+
+    # Also keep denormalized fields for backward compat (first current entry)
+    current_exp = next((e for e in data.experiences if e.is_current), None)
+    if not current_exp and data.experiences:
+        current_exp = data.experiences[0]
+
     updates = {
-        "current_company": data.current_company,
-        "current_title": data.current_title,
+        "current_company": current_exp.company if current_exp else data.current_company,
+        "current_title": current_exp.role if current_exp else data.current_title,
         "years_of_experience": data.years_of_experience,
         "headline": data.headline,
         "summary": data.summary,
@@ -134,7 +160,7 @@ async def save_step_2(
     _advance_step(updates, user.onboarding_step, 2)
     await repo.update(user, updates)
     await db.commit()
-    return {"message": "Step 2 saved", "step": 2}
+    return {"message": "Step 2 saved", "step": 2, "experiences_saved": len(data.experiences)}
 
 
 @router.post("/step/3")
@@ -327,6 +353,27 @@ async def save_step_8(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
+    # Save structured education to normalized table
+    edu_repo = EducationRepository(db)
+    await edu_repo.delete_all_for_user(uuid.UUID(user_id))
+    for i, edu in enumerate(data.education):
+        entry = Education(
+            user_id=uuid.UUID(user_id),
+            degree=edu.degree,
+            custom_degree=edu.custom_degree if edu.degree == "Other" else None,
+            field_of_study=edu.field_of_study,
+            custom_field=edu.custom_field if edu.field_of_study == "Other" else None,
+            institution=edu.institution,
+            start_year=edu.start_year,
+            end_year=edu.end_year,
+            gpa=float(edu.gpa) if edu.gpa else None,
+            gpa_scale=edu.gpa_scale,
+            activities=edu.activities,
+            sort_order=i,
+        )
+        await edu_repo.create(entry)
+
+    # Keep legacy JSON for backward compat
     education_json = json.dumps([e.model_dump() for e in data.education]) if data.education else None
 
     updates: dict = {

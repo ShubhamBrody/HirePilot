@@ -47,6 +47,7 @@ class ResumeVersionResponse(BaseModel):
     ai_tailored: bool
     ai_changes_summary: str | None = None
     parsed_sections: str | None = None
+    ats_score: int | None = None
     is_master: bool
     created_at: datetime
     updated_at: datetime
@@ -78,8 +79,11 @@ class ResumeTailorResponse(BaseModel):
     resume_version_id: str
     name: str
     changes_summary: str
-    matched_keywords: list[str]
-    optimization_score: float
+    matched_keywords: list[str] = []
+    optimization_score: float = 0.0
+    compilation_status: str = "pending"
+    compilation_errors: list[str] | None = None
+    ats_score: int | None = None
 
 
 class ResumeCompileRequest(BaseModel):
@@ -148,3 +152,22 @@ class VersionDiffResponse(BaseModel):
 
 class ResumeRollbackRequest(BaseModel):
     target_version_id: str
+
+
+# ── Spelling/Grammar Check ──────────────────────────────────────
+
+class SpellingCheckRequest(BaseModel):
+    resume_id: str
+
+
+class SpellingIssue(BaseModel):
+    original: str
+    suggested: str
+    context: str
+    issue_type: str  # "spelling", "grammar", "punctuation"
+
+
+class SpellingCheckResponse(BaseModel):
+    issues: list[SpellingIssue]
+    total_issues: int
+    corrected_latex: str | None = None

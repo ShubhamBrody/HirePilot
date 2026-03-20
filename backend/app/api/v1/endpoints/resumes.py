@@ -3,6 +3,7 @@ Resume Endpoints — CRUD, compilation, tailoring, templates, AI chat, parsing, 
 """
 
 import json
+import re
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -27,6 +28,9 @@ from app.schemas.resume import (
     ResumeVersionCreateRequest,
     ResumeVersionResponse,
     ResumeVersionUpdateRequest,
+    SpellingCheckRequest,
+    SpellingCheckResponse,
+    SpellingIssue,
     VersionDiffResponse,
 )
 from app.services.latex_compiler import LatexCompilerService
@@ -133,7 +137,8 @@ async def tailor_resume(
 ):
     """
     AI-tailor a resume for a specific job description.
-    Uses Ollama LLM to generate an optimized version.
+    Auto-compiles the result and runs ATS scoring.
+    Preserves the master resume's LaTeX preamble/structure.
     """
     resume_repo = ResumeRepository(db)
     job_repo = JobRepository(db)
@@ -152,7 +157,7 @@ async def tailor_resume(
     if not job:
         raise HTTPException(status_code=404, detail="Job listing not found")
 
-    # AI tailoring via Ollama
+    # AI tailoring
     tailor_result = await llm.tailor_resume(
         master_latex=source_resume.latex_source,
         job_description=job.description,
@@ -160,6 +165,9 @@ async def tailor_resume(
         role=job.title,
     )
     tailored_latex = tailor_result.get("tailored_latex", source_resume.latex_source)
+
+    # Preamble preservation: extract preamble from master and enforce it
+    tailored_latex = _enforce_master_preamble(source_resume.latex_source, tailored_latex)
 
     # Generate changes summary
     changes = await llm.generate_changes_summary(source_resume.latex_source, tailored_latex)
@@ -180,6 +188,36 @@ async def tailor_resume(
         target_role=job.title,
     )
     created = await resume_repo.create(new_version)
+
+    # Auto-compile the tailored resume
+    compile_status = "pending"
+    compile_errors = None
+    compiler = LatexCompilerService()
+    compile_result = await compiler.compile(tailored_latex)
+    if compile_result["success"]:
+        compile_status = "success"
+        await resume_repo.update(created, {
+            "compilation_status": "success",
+            "pdf_s3_key": compile_result.get("s3_key"),
+        })
+    else:
+        compile_status = "error"
+        compile_errors = compile_result.get("errors", [])[:5]
+        await resume_repo.update(created, {
+            "compilation_status": "error",
+            "compilation_errors": json.dumps(compile_errors),
+        })
+
+    # Auto-ATS-score if we have a job description
+    ats_score = None
+    if job.description:
+        try:
+            score_data = await llm.score_resume_ats(tailored_latex, job.description)
+            ats_score = score_data.get("overall_score", 0)
+            await resume_repo.update(created, {"ats_score": ats_score})
+        except Exception:
+            pass  # Non-critical — don't fail the tailor if scoring fails
+
     await db.commit()
 
     return ResumeTailorResponse(
@@ -188,7 +226,31 @@ async def tailor_resume(
         changes_summary=changes.get("changes_summary", ""),
         matched_keywords=changes.get("keywords_added", []),
         optimization_score=changes.get("optimization_score", 0.0),
+        compilation_status=compile_status,
+        compilation_errors=compile_errors,
+        ats_score=ats_score,
     )
+
+
+def _extract_preamble(latex: str) -> str:
+    """Extract the LaTeX preamble (everything before \\begin{document})."""
+    match = re.search(r"(.*?)(\\begin\{document\})", latex, re.DOTALL)
+    if match:
+        return match.group(1)
+    return ""
+
+
+def _enforce_master_preamble(master_latex: str, tailored_latex: str) -> str:
+    """Replace the tailored resume's preamble with the master's preamble."""
+    master_preamble = _extract_preamble(master_latex)
+    if not master_preamble:
+        return tailored_latex
+
+    # Replace preamble in tailored version
+    match = re.search(r"(.*?)(\\begin\{document\})", tailored_latex, re.DOTALL)
+    if match:
+        return master_preamble + "\\begin{document}" + tailored_latex[match.end():]
+    return tailored_latex
 
 
 # ── ATS Scoring ─────────────────────────────────────────────────
@@ -450,3 +512,41 @@ async def compile_resume(
         return await service.compile_resume(resume_id)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+# ── Spelling / Grammar Check ───────────────────────────────────
+
+
+@router.post("/spelling-check", response_model=SpellingCheckResponse)
+async def check_spelling(
+    data: SpellingCheckRequest,
+    user_id: str = Depends(get_current_user_id),  # noqa: ARG001
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    LLM-based spelling and grammar check for a resume.
+    Ignores proper nouns, names, emails, URLs, and LaTeX commands.
+    """
+    resume_repo = ResumeRepository(db)
+    resume = await resume_repo.get_by_id(uuid.UUID(data.resume_id))
+    if not resume:
+        raise HTTPException(status_code=404, detail="Resume not found")
+
+    llm = LLMService()
+    result = await llm.check_spelling_grammar(resume.latex_source)
+
+    issues = [
+        SpellingIssue(
+            original=issue.get("original", ""),
+            suggested=issue.get("suggested", ""),
+            context=issue.get("context", ""),
+            issue_type=issue.get("issue_type", "spelling"),
+        )
+        for issue in result.get("issues", [])
+    ]
+
+    return SpellingCheckResponse(
+        issues=issues,
+        total_issues=len(issues),
+        corrected_latex=result.get("corrected_latex"),
+    )

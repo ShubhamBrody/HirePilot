@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { onboardingApi } from "@/lib/api";
+import { onboardingApi, profileApi } from "@/lib/api";
 import { useAuthStore } from "@/stores/authStore";
 
 /* ──────────────── types ──────────────── */
@@ -67,9 +67,10 @@ export default function OnboardingPage() {
   const [githubUrl, setGithubUrl] = useState("");
   const [portfolioUrl, setPortfolioUrl] = useState("");
 
-  // Step 2
-  const [currentCompany, setCurrentCompany] = useState("");
-  const [currentTitle, setCurrentTitle] = useState("");
+  // Step 2 — multiple work experiences
+  const [experiences, setExperiences] = useState([
+    { company: "", role: "", location: "", description: "", start_date: "", end_date: "", is_current: false },
+  ]);
   const [yearsExp, setYearsExp] = useState("");
   const [headline, setHeadline] = useState("");
   const [summary, setSummary] = useState("");
@@ -116,8 +117,12 @@ export default function OnboardingPage() {
   const [convertedLatex, setConvertedLatex] = useState("");
   const [uploading, setUploading] = useState(false);
 
-  // Step 8
-  const [education, setEducation] = useState([{ degree: "", field: "", institution: "", year: "", gpa: "" }]);
+  // Step 8 — structured education with degree dropdowns
+  const [education, setEducation] = useState([
+    { degree: "", custom_degree: "", field_of_study: "", custom_field: "", institution: "", start_year: "", end_year: "", gpa: "", gpa_scale: "10", activities: "" },
+  ]);
+  const [degreeChoices, setDegreeChoices] = useState<string[]>([]);
+  const [fieldChoices, setFieldChoices] = useState<string[]>([]);
   const [disability, setDisability] = useState("");
   const [veteran, setVeteran] = useState("");
   const [coverLetter, setCoverLetter] = useState("");
@@ -142,6 +147,15 @@ export default function OnboardingPage() {
 
   useEffect(() => {
     loadProgress();
+    // Load education choices
+    profileApi.getEducationChoices().then(({ data }) => {
+      setDegreeChoices(data.degree_choices || []);
+      setFieldChoices(data.field_of_study_choices || []);
+    }).catch(() => {
+      // Fallback choices
+      setDegreeChoices(["BTech", "BE", "BSc", "BA", "BCom", "BCA", "BBA", "MTech", "ME", "MSc", "MA", "MCom", "MCA", "MBA", "PhD", "MD", "JD", "BS", "MS", "AA", "AS", "Diploma", "Other"]);
+      setFieldChoices(["Computer Science", "Information Technology", "Software Engineering", "Electrical Engineering", "Mechanical Engineering", "Data Science", "Business Administration", "Other"]);
+    });
   }, [loadProgress]);
 
   /* ──── save handlers ──── */
@@ -165,10 +179,10 @@ export default function OnboardingPage() {
             portfolio_url: portfolioUrl || undefined,
           });
           break;
-        case 2:
+        case 2: {
+          const validExps = experiences.filter((e) => e.company && e.role);
           await onboardingApi.saveStep(2, {
-            current_company: currentCompany || undefined,
-            current_title: currentTitle || undefined,
+            experiences: validExps,
             years_of_experience: yearsExp ? parseInt(yearsExp) : undefined,
             headline: headline || undefined,
             summary: summary || undefined,
@@ -177,6 +191,7 @@ export default function OnboardingPage() {
             work_authorization: workAuth || undefined,
           });
           break;
+        }
         case 3:
           await onboardingApi.saveStep(3, {
             current_salary_base: salaryBase ? parseFloat(salaryBase) : undefined,
@@ -232,7 +247,18 @@ export default function OnboardingPage() {
         case 8: {
           const edu = education.filter((e) => e.degree && e.institution);
           await onboardingApi.saveStep(8, {
-            education: edu,
+            education: edu.map((e) => ({
+              degree: e.degree,
+              custom_degree: e.degree === "Other" ? e.custom_degree : undefined,
+              field_of_study: e.field_of_study || undefined,
+              custom_field: e.field_of_study === "Other" ? e.custom_field : undefined,
+              institution: e.institution,
+              start_year: e.start_year ? parseInt(e.start_year) : undefined,
+              end_year: e.end_year ? parseInt(e.end_year) : undefined,
+              gpa: e.gpa || undefined,
+              gpa_scale: e.gpa_scale ? parseFloat(e.gpa_scale) : undefined,
+              activities: e.activities || undefined,
+            })),
             disability_status: disability || undefined,
             veteran_status: veteran || undefined,
             cover_letter_default: coverLetter || undefined,
@@ -401,64 +427,117 @@ export default function OnboardingPage() {
     </div>
   );
 
-  const renderStep2 = () => (
-    <div className="space-y-4">
-      <h2 className="text-xl font-semibold text-[var(--foreground)]">Work Experience</h2>
-      <p className="text-sm text-[var(--muted-foreground)]">Tell us about your current role. This helps with job matching and form auto-fill.</p>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div>
-          <label className={labelClass}>Current Company</label>
-          <input className={inputClass} value={currentCompany} onChange={(e) => setCurrentCompany(e.target.value)} placeholder="Acme Corp" />
+  const renderStep2 = () => {
+    const updateExp = (i: number, field: string, value: string | boolean) => {
+      const updated = [...experiences];
+      (updated[i] as Record<string, string | boolean>)[field] = value;
+      if (field === "is_current" && value === true) {
+        updated[i].end_date = "";
+      }
+      setExperiences(updated);
+    };
+    const addExp = () => setExperiences([...experiences, { company: "", role: "", location: "", description: "", start_date: "", end_date: "", is_current: false }]);
+    const removeExp = (i: number) => setExperiences(experiences.filter((_, j) => j !== i));
+
+    return (
+      <div className="space-y-4">
+        <h2 className="text-xl font-semibold text-[var(--foreground)]">Work Experience</h2>
+        <p className="text-sm text-[var(--muted-foreground)]">Add all your relevant work experiences. Mark your current role with the checkbox.</p>
+
+        {experiences.map((exp, i) => (
+          <div key={i} className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-semibold text-[var(--foreground)]">Experience {i + 1}</span>
+              {experiences.length > 1 && (
+                <button onClick={() => removeExp(i)} className="text-red-500 hover:text-red-700 text-sm font-medium">Remove</button>
+              )}
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className={labelClass}>Company *</label>
+                <input className={inputClass} value={exp.company} onChange={(e) => updateExp(i, "company", e.target.value)} placeholder="Acme Corp" />
+              </div>
+              <div>
+                <label className={labelClass}>Role / Title *</label>
+                <input className={inputClass} value={exp.role} onChange={(e) => updateExp(i, "role", e.target.value)} placeholder="Senior Software Engineer" />
+              </div>
+              <div>
+                <label className={labelClass}>Location</label>
+                <input className={inputClass} value={exp.location} onChange={(e) => updateExp(i, "location", e.target.value)} placeholder="San Francisco, CA" />
+              </div>
+              <div className="flex items-center gap-2 pt-6">
+                <input type="checkbox" id={`current-${i}`} checked={exp.is_current} onChange={(e) => updateExp(i, "is_current", e.target.checked)} className="h-4 w-4 rounded border-[var(--border)]" />
+                <label htmlFor={`current-${i}`} className="text-sm text-[var(--foreground)]">I currently work here</label>
+              </div>
+              <div>
+                <label className={labelClass}>Start Date</label>
+                <input className={inputClass} type="date" value={exp.start_date} onChange={(e) => updateExp(i, "start_date", e.target.value)} />
+              </div>
+              {!exp.is_current && (
+                <div>
+                  <label className={labelClass}>End Date</label>
+                  <input className={inputClass} type="date" value={exp.end_date} onChange={(e) => updateExp(i, "end_date", e.target.value)} />
+                </div>
+              )}
+            </div>
+            <div>
+              <label className={labelClass}>Description</label>
+              <textarea className={inputClass + " h-16 resize-y"} value={exp.description} onChange={(e) => updateExp(i, "description", e.target.value)} placeholder="Key responsibilities and achievements..." />
+            </div>
+          </div>
+        ))}
+
+        <button onClick={addExp} className="text-sm text-brand-600 hover:text-brand-700 font-medium">+ Add Another Experience</button>
+
+        <hr className="border-[var(--border)]" />
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className={labelClass}>Total Years of Experience</label>
+            <input className={inputClass} type="number" min="0" max="50" value={yearsExp} onChange={(e) => setYearsExp(e.target.value)} placeholder="5" />
+          </div>
+          <div>
+            <label className={labelClass}>Experience Level</label>
+            <select className={selectClass} value={experienceLevel} onChange={(e) => setExperienceLevel(e.target.value)}>
+              <option value="">Select...</option>
+              <option value="intern">Intern</option>
+              <option value="junior">Junior (0-2 yrs)</option>
+              <option value="mid">Mid (2-5 yrs)</option>
+              <option value="senior">Senior (5-8 yrs)</option>
+              <option value="staff">Staff (8-12 yrs)</option>
+              <option value="lead">Lead / Principal (12+)</option>
+            </select>
+          </div>
+          <div>
+            <label className={labelClass}>Notice Period (days)</label>
+            <input className={inputClass} type="number" min="0" max="365" value={noticePeriod} onChange={(e) => setNoticePeriod(e.target.value)} placeholder="30" />
+          </div>
+          <div>
+            <label className={labelClass}>Work Authorization</label>
+            <select className={selectClass} value={workAuth} onChange={(e) => setWorkAuth(e.target.value)}>
+              <option value="">Select...</option>
+              <option value="citizen">Citizen</option>
+              <option value="permanent_resident">Permanent Resident</option>
+              <option value="h1b">H-1B Visa</option>
+              <option value="l1">L-1 Visa</option>
+              <option value="opt">OPT</option>
+              <option value="ead">EAD</option>
+              <option value="need_sponsorship">Need Sponsorship</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
         </div>
         <div>
-          <label className={labelClass}>Current Title</label>
-          <input className={inputClass} value={currentTitle} onChange={(e) => setCurrentTitle(e.target.value)} placeholder="Senior Software Engineer" />
+          <label className={labelClass}>Professional Headline</label>
+          <input className={inputClass} value={headline} onChange={(e) => setHeadline(e.target.value)} placeholder="Senior Backend Engineer | Python & Go | Distributed Systems" />
         </div>
         <div>
-          <label className={labelClass}>Years of Experience</label>
-          <input className={inputClass} type="number" min="0" max="50" value={yearsExp} onChange={(e) => setYearsExp(e.target.value)} placeholder="5" />
-        </div>
-        <div>
-          <label className={labelClass}>Experience Level</label>
-          <select className={selectClass} value={experienceLevel} onChange={(e) => setExperienceLevel(e.target.value)}>
-            <option value="">Select...</option>
-            <option value="intern">Intern</option>
-            <option value="junior">Junior (0-2 yrs)</option>
-            <option value="mid">Mid (2-5 yrs)</option>
-            <option value="senior">Senior (5-8 yrs)</option>
-            <option value="staff">Staff (8-12 yrs)</option>
-            <option value="lead">Lead / Principal (12+)</option>
-          </select>
-        </div>
-        <div>
-          <label className={labelClass}>Notice Period (days)</label>
-          <input className={inputClass} type="number" min="0" max="365" value={noticePeriod} onChange={(e) => setNoticePeriod(e.target.value)} placeholder="30" />
-        </div>
-        <div>
-          <label className={labelClass}>Work Authorization</label>
-          <select className={selectClass} value={workAuth} onChange={(e) => setWorkAuth(e.target.value)}>
-            <option value="">Select...</option>
-            <option value="citizen">Citizen</option>
-            <option value="permanent_resident">Permanent Resident</option>
-            <option value="h1b">H-1B Visa</option>
-            <option value="l1">L-1 Visa</option>
-            <option value="opt">OPT</option>
-            <option value="ead">EAD</option>
-            <option value="need_sponsorship">Need Sponsorship</option>
-            <option value="other">Other</option>
-          </select>
+          <label className={labelClass}>Summary</label>
+          <textarea className={inputClass + " h-24 resize-y"} value={summary} onChange={(e) => setSummary(e.target.value)} placeholder="Brief professional summary..." />
         </div>
       </div>
-      <div>
-        <label className={labelClass}>Professional Headline</label>
-        <input className={inputClass} value={headline} onChange={(e) => setHeadline(e.target.value)} placeholder="Senior Backend Engineer | Python & Go | Distributed Systems" />
-      </div>
-      <div>
-        <label className={labelClass}>Summary</label>
-        <textarea className={inputClass + " h-24 resize-y"} value={summary} onChange={(e) => setSummary(e.target.value)} placeholder="Brief professional summary..." />
-      </div>
-    </div>
-  );
+    );
+  };
 
   const renderStep3 = () => {
     const base = parseFloat(salaryBase) || 0;
@@ -767,62 +846,117 @@ export default function OnboardingPage() {
     </div>
   );
 
-  const renderStep8 = () => (
-    <div className="space-y-6">
-      <h2 className="text-xl font-semibold text-[var(--foreground)]">Education & Final Details</h2>
-      <p className="text-sm text-[var(--muted-foreground)]">Almost done! Add your education and optional EEO information.</p>
-      {/* Education entries */}
-      <div className="space-y-3">
-        <h3 className="text-lg font-medium text-[var(--foreground)]">Education</h3>
-        {education.map((edu, i) => (
-          <div key={i} className="grid grid-cols-2 md:grid-cols-5 gap-3 rounded-lg border border-[var(--border)] p-3">
-            <input className={inputClass} value={edu.degree} onChange={(e) => { const n = [...education]; n[i].degree = e.target.value; setEducation(n); }} placeholder="Degree (B.S., M.S.)" />
-            <input className={inputClass} value={edu.field} onChange={(e) => { const n = [...education]; n[i].field = e.target.value; setEducation(n); }} placeholder="Field" />
-            <input className={inputClass} value={edu.institution} onChange={(e) => { const n = [...education]; n[i].institution = e.target.value; setEducation(n); }} placeholder="Institution" />
-            <input className={inputClass} value={edu.year} onChange={(e) => { const n = [...education]; n[i].year = e.target.value; setEducation(n); }} placeholder="Year" />
-            <div className="flex gap-2">
-              <input className={inputClass + " flex-1"} value={edu.gpa} onChange={(e) => { const n = [...education]; n[i].gpa = e.target.value; setEducation(n); }} placeholder="GPA" />
-              {education.length > 1 && (
-                <button onClick={() => setEducation(education.filter((_, j) => j !== i))} className="text-red-500 hover:text-red-700 text-sm">✕</button>
-              )}
+  const renderStep8 = () => {
+    const updateEdu = (i: number, field: string, value: string) => {
+      const updated = [...education];
+      (updated[i] as Record<string, string>)[field] = value;
+      setEducation(updated);
+    };
+    const addEdu = () => setEducation([...education, { degree: "", custom_degree: "", field_of_study: "", custom_field: "", institution: "", start_year: "", end_year: "", gpa: "", gpa_scale: "10", activities: "" }]);
+    const removeEdu = (i: number) => setEducation(education.filter((_, j) => j !== i));
+
+    return (
+      <div className="space-y-6">
+        <h2 className="text-xl font-semibold text-[var(--foreground)]">Education & Final Details</h2>
+        <p className="text-sm text-[var(--muted-foreground)]">Almost done! Add your education and optional EEO information.</p>
+
+        <div className="space-y-4">
+          <h3 className="text-lg font-medium text-[var(--foreground)]">Education</h3>
+          {education.map((edu, i) => (
+            <div key={i} className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold text-[var(--foreground)]">Degree {i + 1}</span>
+                {education.length > 1 && (
+                  <button onClick={() => removeEdu(i)} className="text-red-500 hover:text-red-700 text-sm font-medium">Remove</button>
+                )}
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className={labelClass}>Degree *</label>
+                  <select className={selectClass} value={edu.degree} onChange={(e) => updateEdu(i, "degree", e.target.value)}>
+                    <option value="">Select degree...</option>
+                    {(degreeChoices.length > 0 ? degreeChoices : ["BTech", "BE", "BSc", "BA", "BCom", "BCA", "BBA", "MTech", "ME", "MSc", "MA", "MCom", "MCA", "MBA", "PhD", "BS", "MS", "Diploma", "Other"]).map((d) => (
+                      <option key={d} value={d}>{d}</option>
+                    ))}
+                  </select>
+                  {edu.degree === "Other" && (
+                    <input className={inputClass + " mt-2"} value={edu.custom_degree} onChange={(e) => updateEdu(i, "custom_degree", e.target.value)} placeholder="Enter custom degree name" />
+                  )}
+                </div>
+                <div>
+                  <label className={labelClass}>Field of Study</label>
+                  <select className={selectClass} value={edu.field_of_study} onChange={(e) => updateEdu(i, "field_of_study", e.target.value)}>
+                    <option value="">Select field...</option>
+                    {(fieldChoices.length > 0 ? fieldChoices : ["Computer Science", "Information Technology", "Software Engineering", "Electrical Engineering", "Data Science", "Business Administration", "Other"]).map((f) => (
+                      <option key={f} value={f}>{f}</option>
+                    ))}
+                  </select>
+                  {edu.field_of_study === "Other" && (
+                    <input className={inputClass + " mt-2"} value={edu.custom_field} onChange={(e) => updateEdu(i, "custom_field", e.target.value)} placeholder="Enter custom field of study" />
+                  )}
+                </div>
+                <div>
+                  <label className={labelClass}>Institution *</label>
+                  <input className={inputClass} value={edu.institution} onChange={(e) => updateEdu(i, "institution", e.target.value)} placeholder="MIT, IIT Delhi, Stanford..." />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className={labelClass}>Start Year</label>
+                    <input className={inputClass} type="number" min="1950" max="2040" value={edu.start_year} onChange={(e) => updateEdu(i, "start_year", e.target.value)} placeholder="2018" />
+                  </div>
+                  <div>
+                    <label className={labelClass}>End Year</label>
+                    <input className={inputClass} type="number" min="1950" max="2040" value={edu.end_year} onChange={(e) => updateEdu(i, "end_year", e.target.value)} placeholder="2022" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className={labelClass}>GPA</label>
+                    <input className={inputClass} type="number" step="0.01" min="0" max="10" value={edu.gpa} onChange={(e) => updateEdu(i, "gpa", e.target.value)} placeholder="8.5" />
+                  </div>
+                  <div>
+                    <label className={labelClass}>GPA Scale</label>
+                    <select className={selectClass} value={edu.gpa_scale} onChange={(e) => updateEdu(i, "gpa_scale", e.target.value)}>
+                      <option value="10">/ 10</option>
+                      <option value="4">/ 4.0</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
             </div>
+          ))}
+          <button onClick={addEdu} className="text-sm text-brand-600 hover:text-brand-700 font-medium">+ Add another degree</button>
+        </div>
+
+        {/* EEO */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className={labelClass}>Disability Status</label>
+            <select className={selectClass} value={disability} onChange={(e) => setDisability(e.target.value)}>
+              <option value="">Select...</option>
+              <option value="no">No</option>
+              <option value="yes">Yes</option>
+              <option value="prefer_not_to_say">Prefer not to say</option>
+            </select>
           </div>
-        ))}
-        <button
-          onClick={() => setEducation([...education, { degree: "", field: "", institution: "", year: "", gpa: "" }])}
-          className="text-sm text-brand-600 hover:text-brand-700 font-medium"
-        >
-          + Add another degree
-        </button>
-      </div>
-      {/* EEO */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div>
-          <label className={labelClass}>Disability Status</label>
-          <select className={selectClass} value={disability} onChange={(e) => setDisability(e.target.value)}>
-            <option value="">Select...</option>
-            <option value="no">No</option>
-            <option value="yes">Yes</option>
-            <option value="prefer_not_to_say">Prefer not to say</option>
-          </select>
+          <div>
+            <label className={labelClass}>Veteran Status</label>
+            <select className={selectClass} value={veteran} onChange={(e) => setVeteran(e.target.value)}>
+              <option value="">Select...</option>
+              <option value="no">Not a Veteran</option>
+              <option value="yes">Veteran</option>
+              <option value="protected">Protected Veteran</option>
+              <option value="prefer_not_to_say">Prefer not to say</option>
+            </select>
+          </div>
         </div>
         <div>
-          <label className={labelClass}>Veteran Status</label>
-          <select className={selectClass} value={veteran} onChange={(e) => setVeteran(e.target.value)}>
-            <option value="">Select...</option>
-            <option value="no">Not a Veteran</option>
-            <option value="yes">Veteran</option>
-            <option value="protected">Protected Veteran</option>
-            <option value="prefer_not_to_say">Prefer not to say</option>
-          </select>
+          <label className={labelClass}>Default Cover Letter</label>
+          <textarea className={inputClass + " h-32 resize-y"} value={coverLetter} onChange={(e) => setCoverLetter(e.target.value)} placeholder="Write a default cover letter that can be customized per application..." />
         </div>
       </div>
-      <div>
-        <label className={labelClass}>Default Cover Letter</label>
-        <textarea className={inputClass + " h-32 resize-y"} value={coverLetter} onChange={(e) => setCoverLetter(e.target.value)} placeholder="Write a default cover letter that can be customized per application..." />
-      </div>
-    </div>
-  );
+    );
+  };
 
   const renderCurrentStep = () => {
     switch (step) {

@@ -34,7 +34,21 @@ class OnboardingStep1Request(BaseModel):
 # ── Step 2: Work Experience ──────────────────────────────────────
 
 
+class WorkExperienceEntry(BaseModel):
+    """Single work experience entry for onboarding."""
+    company: str = Field(min_length=1, max_length=255)
+    role: str = Field(min_length=1, max_length=255)
+    location: str | None = None
+    description: str | None = None
+    start_date: str | None = None  # YYYY-MM-DD
+    end_date: str | None = None  # YYYY-MM-DD (null if is_current)
+    is_current: bool = False
+
+
 class OnboardingStep2Request(BaseModel):
+    # Structured work experiences (multiple entries)
+    experiences: list[WorkExperienceEntry] = Field(default_factory=list)
+    # Legacy single-entry fields (backward compat — used if experiences is empty)
     current_company: str | None = None
     current_title: str | None = None
     years_of_experience: int | None = Field(None, ge=0, le=50)
@@ -131,11 +145,16 @@ class ResumeUploadResponse(BaseModel):
 
 
 class EducationEntry(BaseModel):
-    degree: str
-    field: str | None = None
+    degree: str  # From DEGREE_CHOICES or custom "Other"
+    custom_degree: str | None = None  # When degree == "Other"
+    field_of_study: str | None = None  # From FIELD_OF_STUDY_CHOICES
+    custom_field: str | None = None  # When field_of_study == "Other"
     institution: str
-    year: int | None = None
+    start_year: int | None = None
+    end_year: int | None = None
     gpa: str | None = None
+    gpa_scale: float | None = None
+    activities: str | None = None
 
 
 class OnboardingStep8Request(BaseModel):

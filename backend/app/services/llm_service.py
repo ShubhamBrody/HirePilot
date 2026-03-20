@@ -703,3 +703,73 @@ class LLMService:
         except Exception as e:
             logger.warning("LLM recruiter verification failed, returning all", error=str(e))
             return people
+
+    # ── ATS Scoring (direct LLM) ─────────────────────────────────
+
+    async def score_resume_ats(
+        self, resume_latex: str, job_description: str
+    ) -> dict[str, Any]:
+        """
+        Score a resume against a job description for ATS compatibility.
+        Returns dict with overall_score (0-100), matched/missing keywords, etc.
+        """
+        system = (
+            "You are an ATS (Applicant Tracking System) scoring engine.\n"
+            "Score how well the resume matches the job description on a 0-100 scale.\n"
+            "Return ONLY valid JSON with these fields:\n"
+            '{"overall_score": 0-100, "matched_keywords": [...], "missing_keywords": [...], '
+            '"strengths": [...], "weaknesses": [...], "suggestions": [...]}'
+        )
+        prompt = (
+            f"RESUME (LaTeX, first 4000 chars):\n{resume_latex[:4000]}\n\n"
+            f"JOB DESCRIPTION (first 3000 chars):\n{job_description[:3000]}\n\n"
+            "Score this resume for ATS compatibility."
+        )
+        try:
+            result = await self.generate_json(prompt, system=system)
+            score = result.get("overall_score", 0)
+            if isinstance(score, float):
+                score = int(score * 100) if score <= 1.0 else int(score)
+            return {
+                "overall_score": min(100, max(0, int(score))),
+                "matched_keywords": result.get("matched_keywords", []),
+                "missing_keywords": result.get("missing_keywords", []),
+                "strengths": result.get("strengths", []),
+                "weaknesses": result.get("weaknesses", []),
+                "suggestions": result.get("suggestions", []),
+            }
+        except Exception as e:
+            logger.error("ATS scoring failed", error=str(e))
+            return {"overall_score": 0, "matched_keywords": [], "missing_keywords": []}
+
+    # ── Spelling / Grammar Check ─────────────────────────────────
+
+    async def check_spelling_grammar(self, resume_latex: str) -> dict[str, Any]:
+        """
+        LLM-based spelling and grammar check for resume content.
+        Ignores LaTeX commands, proper nouns, names, emails, URLs.
+        """
+        system = (
+            "You are a professional proofreader checking a LaTeX resume for spelling and grammar errors.\n\n"
+            "RULES:\n"
+            "1. IGNORE LaTeX commands (\\section, \\textbf, \\href, etc.)\n"
+            "2. IGNORE proper nouns: company names, product names, technology names\n"
+            "3. IGNORE personal names, email addresses, URLs, phone numbers\n"
+            "4. IGNORE abbreviations and acronyms (API, SDK, CI/CD, etc.)\n"
+            "5. Only flag genuine spelling errors, grammar issues, or punctuation problems\n"
+            "6. For each issue, provide the original text, suggested fix, surrounding context, and type\n\n"
+            "Return ONLY valid JSON:\n"
+            '{"issues": [{"original": "...", "suggested": "...", "context": "...surrounding text...", '
+            '"issue_type": "spelling|grammar|punctuation"}], '
+            '"corrected_latex": "...full corrected LaTeX if issues found, null if no issues..."}'
+        )
+        prompt = f"Check this resume for spelling and grammar:\n\n{resume_latex[:8000]}"
+        try:
+            result = await self.generate_json(prompt, system=system)
+            return {
+                "issues": result.get("issues", []),
+                "corrected_latex": result.get("corrected_latex"),
+            }
+        except Exception as e:
+            logger.error("Spelling check failed", error=str(e))
+            return {"issues": [], "corrected_latex": None}

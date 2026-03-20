@@ -60,6 +60,9 @@ class ResumeVersion(Base):
     # Parsed sections (JSON: {skills, experience, projects, achievements, education})
     parsed_sections: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # ATS score (0-100, populated after auto-scoring)
+    ats_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     is_master: Mapped[bool] = mapped_column(Boolean, default=False)
 
     created_at: Mapped[datetime] = mapped_column(

@@ -19,12 +19,15 @@ from app.core.database import Base
 from app.models import (  # noqa: F401
     Application,
     AuditLog,
+    Education,
     JobListing,
     OutreachMessage,
     Recruiter,
     ResumeTemplate,
     ResumeVersion,
+    Subscription,
     User,
+    WorkExperience,
 )
 
 config = context.config

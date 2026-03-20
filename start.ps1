@@ -31,32 +31,22 @@ try {
     exit 1
 }
 
-# -- 2. Ensure Ollama is running on the host -------------------
+# -- 2. Check GitHub Models API key ----------------------------
 Write-Host ""
-Write-Host "[2/5] Checking Ollama..." -ForegroundColor Yellow
-$ollamaRunning = $false
-try {
-    $r = Invoke-RestMethod -Uri "http://localhost:11434/api/tags" -Method Get -TimeoutSec 3 -ErrorAction Stop
-    $models = ($r.models | ForEach-Object { $_.name }) -join ", "
-    Write-Host "  Ollama is running - models: $models" -ForegroundColor Green
-    $ollamaRunning = $true
-} catch {
-    Write-Host "  Ollama is NOT running." -ForegroundColor Red
-    Write-Host "  Attempting to start Ollama..." -ForegroundColor Yellow
-    $ollamaExe = Get-Command ollama -ErrorAction SilentlyContinue
-    if ($ollamaExe) {
-        Start-Process -FilePath "ollama" -ArgumentList "serve" -WindowStyle Hidden
-        Start-Sleep -Seconds 4
-        try {
-            $null = Invoke-RestMethod -Uri "http://localhost:11434/api/tags" -Method Get -TimeoutSec 5 -ErrorAction Stop
-            Write-Host "  Ollama started successfully." -ForegroundColor Green
-            $ollamaRunning = $true
-        } catch {
-            Write-Host "  WARNING: Could not start Ollama. AI features will use fallback mode." -ForegroundColor DarkYellow
-        }
-    } else {
-        Write-Host "  WARNING: Ollama not installed. AI features will use fallback mode." -ForegroundColor DarkYellow
+Write-Host "[2/5] Checking GitHub Models API..." -ForegroundColor Yellow
+$envFile = Join-Path $root "backend\.env"
+$hasApiKey = $false
+if (Test-Path $envFile) {
+    $envContent = Get-Content $envFile -Raw
+    if ($envContent -match "GITHUB_TOKEN\s*=\s*\S+") {
+        Write-Host "  GitHub Models API key configured." -ForegroundColor Green
+        $hasApiKey = $true
     }
+}
+if (-not $hasApiKey) {
+    Write-Host "  WARNING: GITHUB_TOKEN not found in backend/.env" -ForegroundColor DarkYellow
+    Write-Host "  AI features require a GitHub Models API key." -ForegroundColor DarkYellow
+    Write-Host "  Get one at https://github.com/marketplace/models" -ForegroundColor DarkYellow
 }
 
 # -- 3. Free ports if occupied ---------------------------------
@@ -141,9 +131,7 @@ Write-Host "  API Docs       http://localhost:8000/docs" -ForegroundColor White
 Write-Host "  pgAdmin        http://localhost:5050" -ForegroundColor White
 Write-Host "  MinIO Console  http://localhost:9001" -ForegroundColor White
 Write-Host "  Selenium VNC   http://localhost:7900" -ForegroundColor White
-if ($ollamaRunning) {
-    Write-Host "  Ollama LLM     http://localhost:11434" -ForegroundColor White
-}
+Write-Host "  LLM Provider   GitHub Models (GPT-4o)" -ForegroundColor White
 Write-Host ""
 Write-Host "  To stop:  .\stop.ps1" -ForegroundColor DarkGray
 Write-Host ""

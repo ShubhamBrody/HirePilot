@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useAuthStore } from "@/stores/authStore";
 import toast from "react-hot-toast";
 import { authApi, onboardingApi } from "@/lib/api";
+import { useTheme } from "@/components/ThemeProvider";
 
 interface CredentialStatus {
   platform: string;
@@ -21,6 +22,7 @@ export default function SettingsPage() {
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   const refreshUser = useAuthStore((s) => s.refreshUser);
+  const { theme, setTheme } = useTheme();
 
   // Profile
   const [fullName, setFullName] = useState("");
@@ -415,6 +417,27 @@ export default function SettingsPage() {
         >
           {profileSaving ? "Saving..." : "Save Changes"}
         </button>
+      </div>
+
+      {/* ── Appearance ───────────────────────────────────────── */}
+      <div className="card space-y-4">
+        <h2 className="text-lg font-semibold text-[var(--foreground)]">Appearance</h2>
+        <p className="text-sm text-[var(--muted-foreground)]">Choose your preferred color theme.</p>
+        <div className="flex gap-3">
+          {(["light", "dark", "system"] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTheme(t)}
+              className={`rounded-lg border px-4 py-2 text-sm font-medium capitalize transition ${
+                theme === t
+                  ? "border-brand-500 bg-brand-50 text-brand-700 dark:bg-brand-950/30 dark:text-brand-400"
+                  : "border-[var(--border)] bg-[var(--card)] text-[var(--foreground)] hover:bg-[var(--muted)]"
+              }`}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* ── Personal Info ────────────────────────────────────── */}

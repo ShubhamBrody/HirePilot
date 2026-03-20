@@ -184,6 +184,51 @@ export const insightsApi = {
   salaryAnalysis: () => api.get("/insights/salary-analysis"),
 };
 
+// ---------- Profile (Work Experience & Education) ----------
+export const profileApi = {
+  // Work Experience
+  listExperiences: () => api.get("/profile/work-experience"),
+  createExperience: (data: Record<string, unknown>) =>
+    api.post("/profile/work-experience", data),
+  updateExperience: (id: string, data: Record<string, unknown>) =>
+    api.put(`/profile/work-experience/${id}`, data),
+  deleteExperience: (id: string) =>
+    api.delete(`/profile/work-experience/${id}`),
+  bulkSaveExperiences: (data: Record<string, unknown>[]) =>
+    api.put("/profile/work-experience", data),
+  // Education
+  getEducationChoices: () => api.get("/profile/education/choices"),
+  listEducations: () => api.get("/profile/education"),
+  createEducation: (data: Record<string, unknown>) =>
+    api.post("/profile/education", data),
+  updateEducation: (id: string, data: Record<string, unknown>) =>
+    api.put(`/profile/education/${id}`, data),
+  deleteEducation: (id: string) =>
+    api.delete(`/profile/education/${id}`),
+  bulkSaveEducations: (data: Record<string, unknown>[]) =>
+    api.put("/profile/education", data),
+};
+
+// ---------- Subscription ----------
+export const subscriptionApi = {
+  getPlans: () => api.get("/subscription/plans"),
+  getCurrent: () => api.get("/subscription/current"),
+  changePlan: (plan: string) =>
+    api.post("/subscription/change-plan", { plan }),
+  mockPayment: (card_last4: string) =>
+    api.post("/subscription/mock-payment", { card_last4 }),
+  checkFeature: (feature: string) =>
+    api.get(`/subscription/check-feature/${feature}`),
+};
+
+// ---------- Orchestrator ----------
+export const orchestratorApi = {
+  run: (data: Record<string, unknown>) =>
+    api.post("/orchestrator/run", data),
+  getStatus: (pipelineId: string) =>
+    api.get(`/orchestrator/status/${pipelineId}`),
+};
+
 // ---------- Onboarding ----------
 export const onboardingApi = {
   getProgress: () => api.get("/onboarding/progress"),

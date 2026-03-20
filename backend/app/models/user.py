@@ -118,6 +118,8 @@ class User(Base):
     # Relationships
     resume_versions = relationship("ResumeVersion", back_populates="user", lazy="selectin")
     applications = relationship("Application", back_populates="user", lazy="selectin")
+    work_experiences = relationship("WorkExperience", back_populates="user", lazy="selectin", order_by="WorkExperience.sort_order")
+    educations = relationship("Education", back_populates="user", lazy="selectin", order_by="Education.sort_order")
     audit_logs = relationship("AuditLog", back_populates="user", lazy="noload")
 
     def __repr__(self) -> str:

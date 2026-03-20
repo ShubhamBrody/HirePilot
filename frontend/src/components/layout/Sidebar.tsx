@@ -16,6 +16,8 @@ import {
   FiMessageSquare,
   FiTarget,
   FiTrash2,
+  FiUser,
+  FiZap,
 } from "react-icons/fi";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/stores/authStore";
@@ -27,10 +29,13 @@ const navItems = [
   { href: "/resumes", label: "Resumes", icon: FiFileText },
   { href: "/applications", label: "Applications", icon: FiSend },
   { href: "/recruiters", label: "Recruiters", icon: FiUsers },
+  { href: "/profile", label: "Profile", icon: FiUser },
   { href: "/linkedin-messages", label: "Messages", icon: FiMessageSquare },
   { href: "/agents", label: "AI Agents", icon: FiCpu },
+  { href: "/orchestrator", label: "Pipeline", icon: FiZap },
   { href: "/ats-score", label: "ATS Score", icon: FiTarget },
   { href: "/salary-negotiator", label: "Salary", icon: FiDollarSign },
+  { href: "/subscription", label: "Billing", icon: FiDollarSign },
   { href: "/trash", label: "Trash", icon: FiTrash2 },
   { href: "/settings", label: "Settings", icon: FiSettings },
 ];
