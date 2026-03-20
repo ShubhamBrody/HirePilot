@@ -29,7 +29,10 @@ class ApplicationRepository(BaseRepository[Application]):
         date_to: datetime | None = None,
     ) -> list[Application]:
         """Get user's applications with filters."""
-        query = select(Application).where(Application.user_id == user_id)
+        query = select(Application).where(
+            Application.user_id == user_id,
+            Application.deleted_at.is_(None),
+        )
         if status:
             query = query.where(Application.status == status)
         if company:
@@ -49,7 +52,8 @@ class ApplicationRepository(BaseRepository[Application]):
     ) -> int:
         """Count user's applications, optionally filtered by status."""
         query = select(func.count()).select_from(Application).where(
-            Application.user_id == user_id
+            Application.user_id == user_id,
+            Application.deleted_at.is_(None),
         )
         if status:
             query = query.where(Application.status == status)
@@ -61,6 +65,7 @@ class ApplicationRepository(BaseRepository[Application]):
         query = (
             select(Application.status, func.count())
             .where(Application.user_id == user_id)
+            .where(Application.deleted_at.is_(None))
             .group_by(Application.status)
         )
         result = await self.session.execute(query)
@@ -78,3 +83,18 @@ class ApplicationRepository(BaseRepository[Application]):
         )
         result = await self.session.execute(query)
         return result.scalar_one() > 0
+
+    async def mark_stale_as_withdrawn(self, cutoff: datetime) -> int:
+        """Mark applications with no update before cutoff as WITHDRAWN."""
+        from sqlalchemy import update
+        stmt = (
+            update(Application)
+            .where(Application.updated_at < cutoff)
+            .where(Application.status.in_([
+                ApplicationStatus.APPLIED,
+                ApplicationStatus.APPLYING,
+            ]))
+            .values(status=ApplicationStatus.WITHDRAWN)
+        )
+        result = await self.session.execute(stmt)
+        return result.rowcount

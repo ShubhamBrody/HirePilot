@@ -30,6 +30,7 @@ class JobRepository(BaseRepository[JobListing]):
             select(JobListing)
             .where(JobListing.user_id == user_id)
             .where(JobListing.is_active == is_active)
+            .where(JobListing.deleted_at.is_(None))
         )
         if source:
             query = query.where(JobListing.source == source)
@@ -52,6 +53,7 @@ class JobRepository(BaseRepository[JobListing]):
         query = (
             select(JobListing)
             .where(JobListing.user_id == user_id)
+            .where(JobListing.deleted_at.is_(None))
             .where(JobListing.match_score.isnot(None))
             .where(JobListing.match_score >= min_score)
             .order_by(desc(JobListing.match_score))
@@ -63,3 +65,19 @@ class JobRepository(BaseRepository[JobListing]):
     async def count_user_jobs(self, user_id: uuid.UUID) -> int:
         """Count total jobs for a user."""
         return await self.count({"user_id": user_id})
+
+    async def get_unscored_jobs(self, user_id: uuid.UUID) -> list[JobListing]:
+        """Get jobs that don't have a match score yet."""
+        query = (
+            select(JobListing)
+            .where(JobListing.user_id == user_id)
+            .where(JobListing.deleted_at.is_(None))
+            .where(JobListing.is_active.is_(True))
+            .where(
+                (JobListing.match_score.is_(None))
+                | (JobListing.match_score == 0.0)
+            )
+            .order_by(desc(JobListing.discovered_at))
+        )
+        result = await self.session.execute(query)
+        return list(result.scalars().all())

@@ -57,6 +57,9 @@ class ResumeVersion(Base):
     ai_prompt_used: Mapped[str | None] = mapped_column(Text, nullable=True)
     ai_changes_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Parsed sections (JSON: {skills, experience, projects, achievements, education})
+    parsed_sections: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     is_master: Mapped[bool] = mapped_column(Boolean, default=False)
 
     created_at: Mapped[datetime] = mapped_column(
@@ -66,6 +69,11 @@ class ResumeVersion(Base):
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
+    )
+
+    # Soft-delete
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None, index=True
     )
 
     # Relationships

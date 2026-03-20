@@ -37,6 +37,7 @@ celery_app.conf.task_routes = {
     "app.tasks.ai.*": {"queue": "ai"},
     "app.tasks.automation.*": {"queue": "automation"},
     "app.tasks.outreach.*": {"queue": "outreach"},
+    "app.tasks.agent_tasks.*": {"queue": "ai"},
 }
 
 # ---------- Rate Limits ----------
@@ -59,9 +60,29 @@ celery_app.conf.beat_schedule = {
         "schedule": crontab(minute=0, hour=3),  # 3 AM UTC
         "args": (),
     },
+    "purge-expired-trash-daily": {
+        "task": "app.tasks.automation.purge_expired_trash",
+        "schedule": crontab(minute=30, hour=3),  # 3:30 AM UTC
+        "args": (),
+    },
     "send-scheduled-followups": {
         "task": "app.tasks.outreach.send_scheduled_followups",
         "schedule": crontab(minute=0, hour="9,14"),  # 9 AM, 2 PM UTC
+        "args": (),
+    },
+    "agent-job-search-hourly": {
+        "task": "app.tasks.agent_tasks.run_job_search_periodic",
+        "schedule": crontab(minute=0),  # Every hour
+        "args": (),
+    },
+    "agent-email-check-hourly": {
+        "task": "app.tasks.agent_tasks.run_email_check_periodic",
+        "schedule": crontab(minute=30),  # Every hour at :30
+        "args": (),
+    },
+    "agent-linkedin-reply-hourly": {
+        "task": "app.tasks.agent_tasks.run_linkedin_reply_periodic",
+        "schedule": crontab(minute=15),  # Every hour at :15
         "args": (),
     },
 }

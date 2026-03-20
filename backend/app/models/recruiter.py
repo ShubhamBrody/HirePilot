@@ -61,6 +61,11 @@ class Recruiter(Base):
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
 
+    # Soft-delete
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None, index=True
+    )
+
     # Relationships
     job_listing = relationship("JobListing", back_populates="recruiters")
     messages = relationship("OutreachMessage", back_populates="recruiter", lazy="selectin")

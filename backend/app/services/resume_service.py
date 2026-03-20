@@ -93,11 +93,11 @@ class ResumeService:
         return ResumeVersionResponse.model_validate(resume)
 
     async def delete_version(self, resume_id: str) -> None:
-        """Delete a resume version."""
+        """Soft-delete a resume version."""
         resume = await self.resume_repo.get_by_id(uuid.UUID(resume_id))
         if not resume:
             raise ValueError("Resume version not found")
-        await self.resume_repo.delete(resume)
+        await self.resume_repo.soft_delete(resume)
 
     async def get_master_resume(self, user_id: str) -> ResumeVersionResponse | None:
         """Get the user's master resume."""

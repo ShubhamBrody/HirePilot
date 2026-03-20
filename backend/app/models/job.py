@@ -63,11 +63,19 @@ class JobListing(Base):
     match_reasoning: Mapped[str | None] = mapped_column(Text, nullable=True)
     extracted_keywords: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array
 
+    # Salary breakdown from LLM analysis
+    estimated_salary_breakdown: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
+
     # Metadata
     posted_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     is_active: Mapped[bool] = mapped_column(default=True)
     discovered_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
+    )
+
+    # Soft-delete
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None, index=True
     )
 
     # Relationships
