@@ -123,3 +123,35 @@ def encrypt_credential(plaintext: str) -> str:
 def decrypt_credential(ciphertext: str) -> str:
     """Decrypt a Fernet-encrypted credential string."""
     return _get_fernet().decrypt(ciphertext.encode()).decode()
+
+
+# ── Onboarding Enforcement ────────────────────────────────────────
+
+
+async def get_onboarded_user_id(user_id: str = Depends(get_current_user_id)) -> str:
+    """
+    FastAPI dependency — ensures the user has completed onboarding.
+
+    Use this instead of get_current_user_id on endpoints that require
+    a fully set-up profile (jobs, applications, recruiters, etc.).
+    Onboarding and auth endpoints should keep using get_current_user_id.
+    """
+    from app.core.database import async_session_factory
+    from app.repositories.user_repo import UserRepository
+
+    import uuid as _uuid
+
+    async with async_session_factory() as db:
+        repo = UserRepository(db)
+        user = await repo.get_by_id(_uuid.UUID(user_id))
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found",
+            )
+        if not user.onboarding_completed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Onboarding not completed. Please complete setup at /onboarding.",
+            )
+    return user_id

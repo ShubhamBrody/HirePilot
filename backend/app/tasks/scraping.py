@@ -5,6 +5,7 @@ Celery tasks for job discovery across multiple platforms.
 """
 
 import asyncio
+import json
 from typing import Any
 from uuid import UUID
 
@@ -71,11 +72,12 @@ def scrape_jobs(
 
             saved_count = 0
             for raw in raw_jobs:
-                # Deduplicate by external_id + source
-                existing = await job_repo.find_by_external_id(
-                    raw.get("external_id", ""),
-                    raw.get("source", ""),
-                )
+                # Deduplicate by source_url
+                source_url = raw.get("url", "") or raw.get("source_url", "")
+                if not source_url:
+                    continue
+
+                existing = await job_repo.get_by_source_url(source_url)
                 if existing:
                     continue
 
@@ -85,14 +87,15 @@ def scrape_jobs(
                     title=raw.get("title", ""),
                     company=raw.get("company", ""),
                     location=raw.get("location"),
+                    remote_type=raw.get("remote_type"),
                     description=raw.get("description", ""),
-                    url=raw.get("url", ""),
+                    requirements=raw.get("requirements"),
+                    source_url=source_url,
                     source=JobSource(raw.get("source", "other")),
-                    external_id=raw.get("external_id"),
-                    salary_range=raw.get("salary_range"),
-                    job_type=raw.get("job_type"),
-                    experience_level=raw.get("experience_level"),
-                    skills=raw.get("skills", []),
+                    source_job_id=raw.get("external_id") or raw.get("source_job_id"),
+                    technologies=json.dumps(raw.get("skills", [])) if raw.get("skills") else None,
+                    role_level=raw.get("experience_level") or raw.get("role_level"),
+                    is_active=True,
                 )
                 session.add(job)
                 saved_count += 1
@@ -100,17 +103,18 @@ def scrape_jobs(
             await session.commit()
 
             # Audit log
-            audit = await audit_repo.log_action(
+            await audit_repo.log_action(
                 user_id=UUID(user_id),
                 action="scrape_jobs",
-                resource_type="job",
-                details={
+                module="scraping",
+                entity_type="job",
+                details=json.dumps({
                     "keywords": keywords,
                     "location": location,
                     "sources": sources,
                     "total_found": len(raw_jobs),
                     "new_saved": saved_count,
-                },
+                }),
             )
             await session.commit()
 
@@ -139,22 +143,23 @@ def scrape_jobs_periodic() -> dict[str, Any]:
     async def _periodic():
         async with async_session_factory() as session:
             user_repo = UserRepository(session)
-            # Fetch users with saved job preferences
             users = await user_repo.get_active_users_with_preferences()
 
             triggered = 0
             for user in users:
-                prefs = user.job_preferences or {}
-                keywords = prefs.get("keywords", [])
+                # Read preferences from user model fields
+                keywords = []
+                if user.job_search_keywords:
+                    keywords = [k.strip() for k in user.job_search_keywords.split(",") if k.strip()]
                 if not keywords:
                     continue
 
-                # Dispatch individual scrape task per user
+                location = user.preferred_location
+
                 scrape_jobs.delay(
                     user_id=str(user.id),
                     keywords=keywords,
-                    location=prefs.get("location"),
-                    sources=prefs.get("sources"),
+                    location=location,
                 )
                 triggered += 1
 

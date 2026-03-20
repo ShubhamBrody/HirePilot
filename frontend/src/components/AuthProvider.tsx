@@ -5,11 +5,12 @@ import { usePathname, useRouter } from "next/navigation";
 import { useAuthStore } from "@/stores/authStore";
 
 const PUBLIC_ROUTES = ["/", "/login"];
+const ONBOARDING_ROUTES = ["/onboarding"];
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { isAuthenticated, isLoading, loadUser } = useAuthStore();
+  const { user, isAuthenticated, isLoading, loadUser } = useAuthStore();
 
   useEffect(() => {
     loadUser();
@@ -21,16 +22,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const isPublic =
       PUBLIC_ROUTES.includes(pathname) ||
       pathname.startsWith("/login/callback");
+    const isOnboarding = ONBOARDING_ROUTES.some((r) => pathname.startsWith(r));
 
     if (!isAuthenticated && !isPublic) {
       router.replace("/login");
+      return;
     }
 
-    // If authenticated user visits landing or login, redirect to dashboard
+    // If authenticated user visits landing or login, redirect appropriately
     if (isAuthenticated && (pathname === "/login" || pathname === "/")) {
+      if (user && !user.onboarding_completed) {
+        router.replace("/onboarding");
+      } else {
+        router.replace("/dashboard");
+      }
+      return;
+    }
+
+    // Enforce onboarding completion for app routes
+    if (isAuthenticated && user && !user.onboarding_completed && !isOnboarding && !isPublic) {
+      router.replace("/onboarding");
+      return;
+    }
+
+    // If onboarding is done and user navigates to /onboarding, send to dashboard
+    if (isAuthenticated && user?.onboarding_completed && isOnboarding) {
       router.replace("/dashboard");
     }
-  }, [isAuthenticated, isLoading, pathname, router]);
+  }, [isAuthenticated, isLoading, pathname, router, user]);
 
   if (isLoading) {
     return (

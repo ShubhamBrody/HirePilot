@@ -29,3 +29,14 @@ class UserRepository(BaseRepository[User]):
         """Check if an email is already registered."""
         user = await self.get_by_email(email)
         return user is not None
+
+    async def get_active_users_with_preferences(self) -> list[User]:
+        """Get all active users who have job search keywords set."""
+        query = (
+            select(User)
+            .where(User.is_active.is_(True))
+            .where(User.job_search_keywords.isnot(None))
+            .where(User.job_search_keywords != "")
+        )
+        result = await self.session.execute(query)
+        return list(result.scalars().all())

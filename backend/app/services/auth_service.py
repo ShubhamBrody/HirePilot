@@ -200,21 +200,52 @@ class AuthService:
         user = await self.user_repo.get_by_id(uuid.UUID(user_id))
         if not user:
             raise ValueError("User not found")
-        return JobPreferencesResponse.model_validate(user)
+        return self._preferences_from_user(user)
 
     async def update_preferences(
-        self, user_id: str, keywords: str | None, location: str | None
+        self, user_id: str, data: dict[str, object]
     ) -> JobPreferencesResponse:
         """Update job search preferences."""
+        import json as _json
+
         user = await self.user_repo.get_by_id(uuid.UUID(user_id))
         if not user:
             raise ValueError("User not found")
 
         update: dict[str, str | None] = {}
-        if keywords is not None:
-            update["job_search_keywords"] = keywords
-        if location is not None:
-            update["preferred_location"] = location
+        # Simple text fields
+        for key in ("job_search_keywords", "preferred_location", "experience_level", "email_for_outreach"):
+            if key in data and data[key] is not None:
+                update[key] = str(data[key])
+        # JSON-list fields (stored as text)
+        for key in ("target_roles", "preferred_technologies", "preferred_companies"):
+            if key in data and data[key] is not None:
+                update[key] = _json.dumps(data[key])
+
         if update:
             user = await self.user_repo.update(user, update)
-        return JobPreferencesResponse.model_validate(user)
+        return self._preferences_from_user(user)
+
+    @staticmethod
+    def _preferences_from_user(user: object) -> JobPreferencesResponse:
+        """Build preferences response, decoding JSON-text list fields."""
+        import json as _json
+
+        def _parse_list(val: str | None) -> list[str] | None:
+            if not val:
+                return None
+            try:
+                parsed = _json.loads(val)
+                return parsed if isinstance(parsed, list) else None
+            except (ValueError, TypeError):
+                return None
+
+        return JobPreferencesResponse(
+            job_search_keywords=getattr(user, "job_search_keywords", None),
+            preferred_location=getattr(user, "preferred_location", None),
+            target_roles=_parse_list(getattr(user, "target_roles", None)),
+            preferred_technologies=_parse_list(getattr(user, "preferred_technologies", None)),
+            preferred_companies=_parse_list(getattr(user, "preferred_companies", None)),
+            experience_level=getattr(user, "experience_level", None),
+            email_for_outreach=getattr(user, "email_for_outreach", None),
+        )

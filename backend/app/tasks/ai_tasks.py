@@ -1,17 +1,19 @@
 """
 AI tasks.
 
-Celery tasks for AI-powered operations: resume tailoring, match scoring, JD analysis.
+Celery tasks for AI-powered operations: resume tailoring, match scoring, compilation.
+Uses Ollama LLM via LLMService instead of OpenAI.
 """
 
 import asyncio
+import json
 from typing import Any
 from uuid import UUID
 
 from app.tasks import celery_app
 from app.core.database import async_session_factory
 from app.core.logging import get_logger
-from app.services.resume_tailoring import ResumeTailoringService
+from app.services.llm_service import LLMService
 from app.services.latex_compiler import LatexCompilerService
 from app.services.storage import StorageService
 from app.repositories.resume_repo import ResumeRepository
@@ -42,11 +44,11 @@ def tailor_resume(
     job_listing_id: str,
 ) -> dict[str, Any]:
     """
-    Tailor a resume for a specific job listing using AI.
+    Tailor a resume for a specific job listing using Ollama AI.
 
     Pipeline:
-      1. Load master resume LaTeX + job description
-      2. AI analyzes JD and tailors resume
+      1. Load source resume LaTeX + job description
+      2. AI tailors resume for the JD
       3. Compile tailored LaTeX to PDF
       4. Store PDF in S3
       5. Save new ResumeVersion
@@ -64,37 +66,41 @@ def tailor_resume(
             job_repo = JobRepository(session)
             audit_repo = AuditLogRepository(session)
 
-            tailoring_svc = ResumeTailoringService()
+            llm = LLMService()
             compiler = LatexCompilerService()
             storage = StorageService()
 
             # 1. Load source resume and job
-            source_resume = await resume_repo.get(UUID(resume_version_id))
+            source_resume = await resume_repo.get_by_id(UUID(resume_version_id))
             if not source_resume:
                 return {"error": "Resume version not found"}
 
-            job = await job_repo.get(UUID(job_listing_id))
+            job = await job_repo.get_by_id(UUID(job_listing_id))
             if not job:
                 return {"error": "Job listing not found"}
 
-            # 2. AI tailoring
-            tailored_result = await tailoring_svc.tailor_resume(
-                resume_latex=source_resume.latex_content,
+            # 2. AI tailoring via Ollama
+            tailored_result = await llm.tailor_resume(
+                master_latex=source_resume.latex_source,
                 job_description=job.description,
-                job_title=job.title,
                 company=job.company,
+                role=job.title,
             )
-
             tailored_latex = tailored_result.get("tailored_latex", "")
-            changes = tailored_result.get("changes_summary", "")
+
+            # Generate changes summary
+            changes_result = await llm.generate_changes_summary(
+                source_resume.latex_source, tailored_latex
+            )
+            changes = changes_result.get("changes_summary", "")
 
             # 3. Compile to PDF
             compile_result = await compiler.compile(tailored_latex)
 
             # 4. Store PDF if compilation succeeded
-            pdf_url = None
+            pdf_s3_key = None
             if compile_result["success"] and compile_result["pdf_data"]:
-                pdf_url = await storage.upload_resume_pdf(
+                pdf_s3_key = await storage.upload_resume_pdf(
                     user_id=user_id,
                     filename=f"tailored_{job.company}_{job.title}.pdf".replace(" ", "_"),
                     pdf_data=compile_result["pdf_data"],
@@ -105,22 +111,27 @@ def tailor_resume(
             new_version = ResumeVersion(
                 user_id=UUID(user_id),
                 name=f"Tailored for {job.title} @ {job.company}",
-                latex_content=tailored_latex,
+                latex_source=tailored_latex,
                 is_master=False,
                 version_number=await resume_repo.get_next_version_number(UUID(user_id)),
-                pdf_url=pdf_url,
-                compiled_successfully=compile_result["success"],
-                compilation_errors=compile_result.get("errors"),
+                pdf_s3_key=pdf_s3_key,
+                compilation_status="success" if compile_result["success"] else "failed",
+                compilation_errors=json.dumps(compile_result.get("errors", [])),
                 tailored_for_job_id=job.id,
+                ai_tailored=True,
                 ai_changes_summary=changes,
+                target_company=job.company,
+                target_role=job.title,
             )
             session.add(new_version)
 
             # 6. Compute and update match score
-            match_score = await tailoring_svc.compute_match_score(
+            score_result = await llm.compute_fit_score(
                 tailored_latex, job.description
             )
+            match_score = score_result.get("match_score", 0.0)
             job.match_score = match_score
+            job.match_reasoning = score_result.get("reasoning", "")
             session.add(job)
 
             await session.commit()
@@ -129,20 +140,21 @@ def tailor_resume(
             await audit_repo.log_action(
                 user_id=UUID(user_id),
                 action="tailor_resume",
-                resource_type="resume",
-                resource_id=new_version.id,
-                details={
+                module="ai",
+                entity_type="resume",
+                entity_id=str(new_version.id),
+                details=json.dumps({
                     "source_resume_id": resume_version_id,
                     "job_id": job_listing_id,
                     "match_score": match_score,
                     "compiled": compile_result["success"],
-                },
+                }),
             )
             await session.commit()
 
             return {
                 "new_version_id": str(new_version.id),
-                "pdf_url": pdf_url,
+                "pdf_s3_key": pdf_s3_key,
                 "match_score": match_score,
                 "changes_summary": changes,
                 "compiled": compile_result["success"],
@@ -171,7 +183,7 @@ def batch_match_score(self, user_id: str) -> dict[str, Any]:
         async with async_session_factory() as session:
             resume_repo = ResumeRepository(session)
             job_repo = JobRepository(session)
-            tailoring_svc = ResumeTailoringService()
+            llm = LLMService()
 
             master = await resume_repo.get_master_resume(UUID(user_id))
             if not master:
@@ -182,10 +194,11 @@ def batch_match_score(self, user_id: str) -> dict[str, Any]:
 
             for job in unscored:
                 try:
-                    score = await tailoring_svc.compute_match_score(
-                        master.latex_content, job.description
+                    result = await llm.compute_fit_score(
+                        master.latex_source, job.description
                     )
-                    job.match_score = score
+                    job.match_score = result.get("match_score", 0.0)
+                    job.match_reasoning = result.get("reasoning", "")
                     session.add(job)
                     scored += 1
                 except Exception as e:
@@ -213,29 +226,29 @@ def compile_resume(user_id: str, resume_version_id: str) -> dict[str, Any]:
             compiler = LatexCompilerService()
             storage = StorageService()
 
-            resume = await resume_repo.get(UUID(resume_version_id))
+            resume = await resume_repo.get_by_id(UUID(resume_version_id))
             if not resume:
                 return {"error": "Resume not found"}
 
-            result = await compiler.compile(resume.latex_content)
+            result = await compiler.compile(resume.latex_source)
 
-            pdf_url = None
+            pdf_s3_key = None
             if result["success"] and result["pdf_data"]:
-                pdf_url = await storage.upload_resume_pdf(
+                pdf_s3_key = await storage.upload_resume_pdf(
                     user_id=user_id,
                     filename=f"{resume.name}.pdf".replace(" ", "_"),
                     pdf_data=result["pdf_data"],
                 )
 
-            resume.compiled_successfully = result["success"]
-            resume.compilation_errors = result.get("errors")
-            resume.pdf_url = pdf_url
+            resume.compilation_status = "success" if result["success"] else "failed"
+            resume.compilation_errors = json.dumps(result.get("errors", []))
+            resume.pdf_s3_key = pdf_s3_key
             session.add(resume)
             await session.commit()
 
             return {
                 "compiled": result["success"],
-                "pdf_url": pdf_url,
+                "pdf_s3_key": pdf_s3_key,
                 "errors": result.get("errors", []),
                 "warnings": result.get("warnings", []),
             }

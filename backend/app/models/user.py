@@ -7,7 +7,7 @@ Stores user accounts with hashed passwords and encrypted platform credentials.
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, String, Text
+from sqlalchemy import Boolean, Date, DateTime, Float, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -48,6 +48,60 @@ class User(Base):
     # Job search preferences
     job_search_keywords: Mapped[str | None] = mapped_column(Text, nullable=True)
     preferred_location: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    # Structured onboarding profile (Section 1 of design doc)
+    target_roles: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array: ["SDE 2", "Backend Engineer"]
+    preferred_technologies: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array: ["Python", "Java"]
+    preferred_companies: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON array: ["Google", "Stripe"]
+    experience_level: Mapped[str | None] = mapped_column(String(50), nullable=True)  # junior, mid, senior, lead
+    email_for_outreach: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # Gmail integration (encrypted refresh token)
+    gmail_refresh_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # ── Onboarding questionnaire fields ──────────────────────────
+
+    # Personal information
+    date_of_birth: Mapped[datetime | None] = mapped_column(Date, nullable=True)
+    gender: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    nationality: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    address: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON: {street, city, state, zip, country}
+
+    # Work history
+    current_company: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    current_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    years_of_experience: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    notice_period_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    work_authorization: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+    # Salary & compensation
+    current_salary_base: Mapped[float | None] = mapped_column(Float, nullable=True)
+    current_salary_bonus: Mapped[float | None] = mapped_column(Float, nullable=True)
+    current_salary_rsu: Mapped[float | None] = mapped_column(Float, nullable=True)
+    current_salary_ctc: Mapped[float | None] = mapped_column(Float, nullable=True)
+    salary_currency: Mapped[str | None] = mapped_column(String(10), nullable=True, default="USD")
+    expected_salary_min: Mapped[float | None] = mapped_column(Float, nullable=True)
+    expected_salary_max: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # Education (JSON array: [{degree, field, institution, year, gpa}])
+    education: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Job preferences
+    willing_to_relocate: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    remote_preference: Mapped[str | None] = mapped_column(String(50), nullable=True)  # remote, hybrid, onsite, any
+    job_type_preference: Mapped[str | None] = mapped_column(String(50), nullable=True)  # full_time, contract, either
+
+    # Classified skills (JSON: {languages: [], frameworks: [], databases: [], ...})
+    classified_skills: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # EEO & misc
+    cover_letter_default: Mapped[str | None] = mapped_column(Text, nullable=True)
+    disability_status: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    veteran_status: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
+    # Onboarding tracking
+    onboarding_completed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
+    onboarding_step: Mapped[int] = mapped_column(Integer, default=0, nullable=False, server_default="0")
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False)

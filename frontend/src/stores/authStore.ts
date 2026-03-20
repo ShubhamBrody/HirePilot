@@ -15,8 +15,27 @@ interface User {
   portfolio_url: string | null;
   job_search_keywords: string | null;
   preferred_location: string | null;
+  target_roles: string | null;
+  preferred_technologies: string | null;
+  preferred_companies: string | null;
+  experience_level: string | null;
+  email_for_outreach: string | null;
   is_active: boolean;
   is_verified: boolean;
+  // Onboarding fields
+  onboarding_completed: boolean;
+  onboarding_step: number;
+  current_company: string | null;
+  current_title: string | null;
+  years_of_experience: number | null;
+  salary_currency: string | null;
+  current_salary_ctc: number | null;
+  expected_salary_min: number | null;
+  expected_salary_max: number | null;
+  classified_skills: Record<string, string[]> | null;
+  remote_preference: string | null;
+  willing_to_relocate: boolean | null;
+  job_type_preference: string | null;
 }
 
 interface AuthState {

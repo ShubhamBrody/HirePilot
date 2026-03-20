@@ -6,13 +6,11 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# System deps (pdflatex for LaTeX compilation + Playwright deps)
+# System deps (pdflatex for LaTeX compilation)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     texlive-latex-base texlive-latex-recommended texlive-latex-extra \
     texlive-fonts-recommended texlive-fonts-extra \
     curl build-essential \
-    libnss3 libatk-bridge2.0-0 libxcomposite1 libxdamage1 libxrandr2 \
-    libgbm1 libpango-1.0-0 libcairo2 libasound2 libxshmfence1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy all source
@@ -20,9 +18,6 @@ COPY . .
 
 # Install Python deps
 RUN pip install --no-cache-dir -e ".[dev]"
-
-# Install Playwright browsers
-RUN playwright install --with-deps chromium
 
 EXPOSE 8000
 

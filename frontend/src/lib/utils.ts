@@ -29,13 +29,18 @@ export function truncate(text: string, maxLen: number): string {
 
 /** Status color mapping for application badges */
 export const statusColors: Record<string, string> = {
-  saved: "badge-gray",
+  draft: "badge-gray",
+  applying: "badge-yellow",
   applied: "badge-blue",
-  screening: "badge-yellow",
-  interviewing: "badge-yellow",
+  viewed: "badge-blue",
+  interview: "badge-amber",
   offer: "badge-green",
-  accepted: "badge-green",
   rejected: "badge-red",
   withdrawn: "badge-red",
+  // Legacy aliases
+  saved: "badge-gray",
+  screening: "badge-yellow",
+  interviewing: "badge-amber",
+  accepted: "badge-green",
   no_response: "badge-gray",
 };

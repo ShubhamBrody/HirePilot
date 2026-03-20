@@ -77,9 +77,20 @@ class Settings(BaseSettings):
     celery_broker_url: str = "redis://localhost:6379/1"
     celery_result_backend: str = "redis://localhost:6379/2"
 
-    # ── Ollama (Local LLM) ────────────────────────────────────────
-    ollama_base_url: str = "http://localhost:11434"
-    ollama_model: str = "llama3.1"
+    # ── LLM Provider (GitHub Models / OpenAI-compatible) ─────────
+    llm_base_url: str = "https://models.github.ai/inference"
+    llm_model: str = "gpt-4o"
+    llm_api_key: SecretStr = Field(default=SecretStr(""))
+    llm_temperature: float = 0.7
+    llm_max_tokens: int = 4096
+
+    # ── Selenium (Browser Automation) ─────────────────────────────
+    selenium_url: str = "http://selenium-chrome:4444/wd/hub"
+
+    # ── Gmail (Email Checker Agent) ───────────────────────────────
+    gmail_client_id: str = ""
+    gmail_client_secret: SecretStr = Field(default=SecretStr(""))
+    gmail_scopes: str = "https://www.googleapis.com/auth/gmail.readonly"
 
     # ── LaTeX ────────────────────────────────────────────────────
     latex_compiler_path: str = "/usr/bin/pdflatex"

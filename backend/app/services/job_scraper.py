@@ -18,7 +18,16 @@ from typing import Any
 
 import httpx
 from bs4 import BeautifulSoup
-from playwright.async_api import Page, async_playwright
+
+try:
+    from selenium import webdriver
+    from selenium.webdriver.chrome.options import Options as ChromeOptions
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
+    HAS_SELENIUM = True
+except ImportError:
+    HAS_SELENIUM = False
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -82,11 +91,10 @@ class BaseScraper(abc.ABC):
 
 class LinkedInScraper(BaseScraper):
     """
-    LinkedIn job scraper using Playwright for dynamic rendering.
+    LinkedIn job scraper using Selenium + Remote Chrome.
 
     Note: LinkedIn heavily rate-limits and may require authentication.
-    In production, use LinkedIn's official Jobs API where available,
-    or implement session-based scraping with proper credential management.
+    In production, use LinkedIn's official Jobs API where available.
     """
 
     source = JobSource.LINKEDIN
@@ -100,6 +108,10 @@ class LinkedInScraper(BaseScraper):
         if filters.technologies:
             keywords += " " + " ".join(filters.technologies)
 
+        if not HAS_SELENIUM:
+            logger.warning("Selenium not available, skipping LinkedIn scrape")
+            return jobs
+
         params = {
             "keywords": keywords,
             "location": filters.location or "",
@@ -107,51 +119,69 @@ class LinkedInScraper(BaseScraper):
         }
 
         try:
-            async with async_playwright() as pw:
-                browser = await pw.chromium.launch(headless=True)
-                context = await browser.new_context(
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            selenium_url = getattr(settings, "selenium_hub_url", "http://selenium-chrome:4444/wd/hub")
+            chrome_options = ChromeOptions()
+            chrome_options.add_argument("--headless")
+            chrome_options.add_argument("--no-sandbox")
+            chrome_options.add_argument("--disable-dev-shm-usage")
+            chrome_options.add_argument(
+                "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+            )
+
+            def _scrape_sync() -> list[dict[str, Any]]:
+                driver = webdriver.Remote(
+                    command_executor=selenium_url,
+                    options=chrome_options,
                 )
-                page = await context.new_page()
+                try:
+                    url = f"{self.BASE_URL}?{'&'.join(f'{k}={v}' for k, v in params.items())}"
+                    driver.get(url)
 
-                url = f"{self.BASE_URL}?{'&'.join(f'{k}={v}' for k, v in params.items())}"
-                await page.goto(url, wait_until="networkidle", timeout=30000)
-
-                # Scroll to load more jobs
-                for _ in range(3):
-                    await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                    await self._random_delay(1.5, 2.5)
-
-                # Extract job cards
-                job_cards = await page.query_selector_all(".base-card")
-                for card in job_cards[: filters.max_results]:
+                    # Wait for cards
                     try:
-                        title_el = await card.query_selector(".base-search-card__title")
-                        company_el = await card.query_selector(".base-search-card__subtitle")
-                        location_el = await card.query_selector(".job-search-card__location")
-                        link_el = await card.query_selector("a.base-card__full-link")
+                        WebDriverWait(driver, 10).until(
+                            EC.presence_of_element_located((By.CSS_SELECTOR, ".base-card"))
+                        )
+                    except Exception:
+                        pass
 
-                        title = await title_el.inner_text() if title_el else "Unknown"
-                        company = await company_el.inner_text() if company_el else "Unknown"
-                        location = await location_el.inner_text() if location_el else None
-                        link = await link_el.get_attribute("href") if link_el else ""
+                    # Scroll to load more
+                    for _ in range(3):
+                        driver.execute_script("window.scrollTo(0, document.body.scrollHeight)")
+                        import time
+                        time.sleep(random.uniform(1.5, 2.5))
 
-                        if title and company and link:
-                            jobs.append(self._normalize_job(
-                                title=title,
-                                company=company,
-                                location=location,
-                                description="",  # Fetched separately in detail scrape
-                                source_url=link,
-                                user_id=user_id,
-                            ))
-                    except Exception as e:
-                        logger.warning("Error parsing LinkedIn job card", error=str(e))
-                        continue
+                    cards = driver.find_elements(By.CSS_SELECTOR, ".base-card")
+                    result: list[dict[str, Any]] = []
+                    for card in cards[: filters.max_results]:
+                        try:
+                            title_el = card.find_elements(By.CSS_SELECTOR, ".base-search-card__title")
+                            company_el = card.find_elements(By.CSS_SELECTOR, ".base-search-card__subtitle")
+                            location_el = card.find_elements(By.CSS_SELECTOR, ".job-search-card__location")
+                            link_el = card.find_elements(By.CSS_SELECTOR, "a.base-card__full-link")
 
-                    await self._random_delay()
+                            title = title_el[0].text if title_el else "Unknown"
+                            company = company_el[0].text if company_el else "Unknown"
+                            location = location_el[0].text if location_el else None
+                            link = link_el[0].get_attribute("href") if link_el else ""
 
-                await browser.close()
+                            if title and company and link:
+                                result.append(self._normalize_job(
+                                    title=title,
+                                    company=company,
+                                    location=location,
+                                    description="",
+                                    source_url=link,
+                                    user_id=user_id,
+                                ))
+                        except Exception as e:
+                            logger.warning("Error parsing LinkedIn job card", error=str(e))
+                            continue
+                    return result
+                finally:
+                    driver.quit()
+
+            jobs = await asyncio.get_event_loop().run_in_executor(None, _scrape_sync)
 
         except Exception as e:
             logger.error("LinkedIn scraping failed", error=str(e))
@@ -165,7 +195,6 @@ class LinkedInScraper(BaseScraper):
 class IndeedScraper(BaseScraper):
     """
     Indeed job scraper using httpx + BeautifulSoup.
-    Falls back to Playwright if dynamic rendering is needed.
     """
 
     source = JobSource.INDEED

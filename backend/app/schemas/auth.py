@@ -44,6 +44,21 @@ class UserProfileResponse(BaseModel):
     preferred_location: str | None = None
     is_active: bool
     is_verified: bool
+    # Onboarding fields
+    onboarding_completed: bool = False
+    onboarding_step: int = 0
+    current_company: str | None = None
+    current_title: str | None = None
+    years_of_experience: int | None = None
+    experience_level: str | None = None
+    salary_currency: str | None = None
+    current_salary_ctc: float | None = None
+    expected_salary_min: float | None = None
+    expected_salary_max: float | None = None
+    classified_skills: str | None = None
+    remote_preference: str | None = None
+    willing_to_relocate: bool | None = None
+    job_type_preference: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -63,6 +78,35 @@ class UserProfileUpdateRequest(BaseModel):
     linkedin_url: str | None = None
     github_url: str | None = None
     portfolio_url: str | None = None
+    # Extended profile fields
+    current_company: str | None = None
+    current_title: str | None = None
+    years_of_experience: int | None = None
+    experience_level: str | None = None
+    notice_period_days: int | None = None
+    work_authorization: str | None = None
+    gender: str | None = None
+    nationality: str | None = None
+    address: str | None = None  # JSON string
+    date_of_birth: str | None = None
+    # Salary
+    current_salary_base: float | None = None
+    current_salary_bonus: float | None = None
+    current_salary_rsu: float | None = None
+    salary_currency: str | None = None
+    expected_salary_min: float | None = None
+    expected_salary_max: float | None = None
+    # Education & EEO
+    education: str | None = None  # JSON string
+    disability_status: str | None = None
+    veteran_status: str | None = None
+    cover_letter_default: str | None = None
+    # Skills (classified JSON)
+    classified_skills: str | None = None
+    # Job preferences
+    remote_preference: str | None = None
+    willing_to_relocate: bool | None = None
+    job_type_preference: str | None = None
 
 
 # ── Credentials ──────────────────────────────────────────────────
@@ -89,12 +133,28 @@ class JobPreferencesRequest(BaseModel):
     """Request to update job search preferences."""
     job_search_keywords: str | None = None
     preferred_location: str | None = None
+    target_roles: list[str] | None = None
+    preferred_technologies: list[str] | None = None
+    preferred_companies: list[str] | None = None
+    experience_level: str | None = Field(None, pattern="^(intern|junior|mid|senior|staff|lead|principal)$")
+    email_for_outreach: str | None = None
+    willing_to_relocate: bool | None = None
+    remote_preference: str | None = Field(None, pattern="^(remote|hybrid|onsite|any)$")
+    job_type_preference: str | None = Field(None, pattern="^(full_time|contract|either)$")
 
 
 class JobPreferencesResponse(BaseModel):
     """Response with current job search preferences."""
     job_search_keywords: str | None = None
     preferred_location: str | None = None
+    target_roles: list[str] | None = None
+    preferred_technologies: list[str] | None = None
+    preferred_companies: list[str] | None = None
+    experience_level: str | None = None
+    email_for_outreach: str | None = None
+    willing_to_relocate: bool | None = None
+    remote_preference: str | None = None
+    job_type_preference: str | None = None
 
     model_config = {"from_attributes": True}
 

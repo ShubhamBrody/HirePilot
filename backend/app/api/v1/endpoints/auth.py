@@ -181,7 +181,7 @@ async def update_preferences(
     try:
         service = AuthService(db)
         return await service.update_preferences(
-            user_id, data.job_search_keywords, data.preferred_location
+            user_id, data.model_dump(exclude_none=True)
         )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
