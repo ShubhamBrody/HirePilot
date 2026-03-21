@@ -107,6 +107,7 @@ def _register_all_agents(orch: AgentOrchestrator) -> None:
     """Import and register every agent."""
     from app.agents.application_agent import ApplicationAgent
     from app.agents.ats_scoring_agent import ATSScoringAgent
+    from app.agents.company_search_agent import CompanySearchAgent
     from app.agents.email_checker_agent import EmailCheckerAgent
     from app.agents.job_search_agent import JobSearchAgent
     from app.agents.linkedin_message_agent import LinkedInMessageAgent
@@ -129,5 +130,6 @@ def _register_all_agents(orch: AgentOrchestrator) -> None:
         LinkedInMessageAgent,
         LinkedInReplyAgent,
         ATSScoringAgent,
+        CompanySearchAgent,
     ):
         orch.register(cls())

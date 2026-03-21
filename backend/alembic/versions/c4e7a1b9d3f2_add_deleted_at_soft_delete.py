@@ -21,19 +21,19 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     op.add_column(
         'applications',
-        sa.Column('deleted_at', sa.DateTime(timezone=True), nullable=True, index=True),
+        sa.Column('deleted_at', sa.DateTime(timezone=True), nullable=True),
     )
     op.add_column(
         'job_listings',
-        sa.Column('deleted_at', sa.DateTime(timezone=True), nullable=True, index=True),
+        sa.Column('deleted_at', sa.DateTime(timezone=True), nullable=True),
     )
     op.add_column(
         'resume_versions',
-        sa.Column('deleted_at', sa.DateTime(timezone=True), nullable=True, index=True),
+        sa.Column('deleted_at', sa.DateTime(timezone=True), nullable=True),
     )
     op.add_column(
         'recruiters',
-        sa.Column('deleted_at', sa.DateTime(timezone=True), nullable=True, index=True),
+        sa.Column('deleted_at', sa.DateTime(timezone=True), nullable=True),
     )
     op.create_index('ix_applications_deleted_at', 'applications', ['deleted_at'])
     op.create_index('ix_job_listings_deleted_at', 'job_listings', ['deleted_at'])

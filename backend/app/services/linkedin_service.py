@@ -592,6 +592,9 @@ class LinkedInService:
                     # Strip connection-degree suffix: "Name · 2nd" → "Name"
                     if " ·" in raw:
                         raw = raw.split(" ·")[0].strip()
+                    # Strip bullet separator
+                    if " •" in raw:
+                        raw = raw.split(" •")[0].strip()
                     if raw.lower() in skip_names or len(raw) < 3:
                         continue
                     seen.add(href)
@@ -603,12 +606,21 @@ class LinkedInService:
                         "company": company,
                     }
 
-                    # Walk up DOM to the enclosing <li> for title / location
+                    # Walk up DOM to the enclosing container for title / location
+                    # Accept li, div, article, or section as containers
                     try:
                         container = anchor
-                        for _ in range(8):
+                        container_tags = {"li", "article", "section"}
+                        for _ in range(10):
                             parent = container.find_element(By.XPATH, "..")
-                            if parent.tag_name == "li" and len(parent.text) > len(raw) + 10:
+                            tag = parent.tag_name
+                            parent_text_len = len(parent.text or "")
+                            # A good container has substantially more text than just the name
+                            if tag in container_tags and parent_text_len > len(raw) + 20:
+                                container = parent
+                                break
+                            # Also accept div if it has enough text and isn't the body
+                            if tag == "div" and parent_text_len > len(raw) + 40 and parent_text_len < 2000:
                                 container = parent
                                 break
                             container = parent
@@ -619,13 +631,23 @@ class LinkedInService:
                         ]
                         for i, line in enumerate(lines):
                             if raw in line:
-                                if (
-                                    i + 1 < len(lines)
-                                    and lines[i + 1].lower() not in skip_names
-                                ):
-                                    person["title"] = lines[i + 1]
-                                if i + 2 < len(lines) and "," in lines[i + 2]:
-                                    person["location"] = lines[i + 2]
+                                # Title is typically the next non-trivial line after the name
+                                for j in range(i + 1, min(i + 4, len(lines))):
+                                    candidate = lines[j].strip()
+                                    if (
+                                        candidate.lower() not in skip_names
+                                        and len(candidate) > 3
+                                        and candidate not in ("2nd", "3rd+", "1st")
+                                        and " •" not in candidate
+                                    ):
+                                        person["title"] = candidate
+                                        break
+                                # Location is typically after title, contains a comma
+                                for j in range(i + 2, min(i + 5, len(lines))):
+                                    candidate = lines[j].strip()
+                                    if "," in candidate and candidate != person.get("title"):
+                                        person["location"] = candidate
+                                        break
                                 break
                     except Exception:
                         pass
@@ -650,6 +672,108 @@ class LinkedInService:
                     continue
         except Exception as e:
             logger.warning("Profile-link extraction failed", error=str(e))
+        return people
+
+    def _extract_people_from_body_text(
+        self, driver: Any, company: str,
+    ) -> list[dict[str, Any]]:
+        """
+        Last-resort fallback: parse people from the page body text directly.
+        LinkedIn search results have a consistent text pattern:
+            Name \n • Degree\n Title\n Location\n Connect/Follow
+        """
+        import re
+        people: list[dict[str, Any]] = []
+        try:
+            body_text = driver.find_element(By.TAG_NAME, "body").text
+            # Split into lines
+            lines = [l.strip() for l in body_text.split("\n") if l.strip()]
+
+            # Find profile links to match names with URLs
+            anchors = driver.find_elements(By.CSS_SELECTOR, "a[href*='/in/']")
+            name_to_url: dict[str, str] = {}
+            for a in anchors:
+                try:
+                    href = (a.get_attribute("href") or "").split("?")[0]
+                    if "/in/" in href:
+                        name_text = a.text.strip().split("\n")[0].strip()
+                        if " •" in name_text:
+                            name_text = name_text.split(" •")[0].strip()
+                        if " ·" in name_text:
+                            name_text = name_text.split(" ·")[0].strip()
+                        if name_text and len(name_text) > 2:
+                            name_to_url[name_text] = href
+                except Exception:
+                    continue
+
+            # Look for the pattern: name followed by " • Nth" degree indicator
+            skip_words = {
+                "home", "jobs", "messaging", "me", "connect", "follow",
+                "message", "my network", "for business", "notifications",
+            }
+            co_lower = company.lower()
+            first_word = co_lower.split()[0] if co_lower.strip() else ""
+
+            i = 0
+            while i < len(lines):
+                line = lines[i]
+                # Connection degree markers follow name lines
+                if i + 1 < len(lines) and lines[i + 1] in ("• 1st", "• 2nd", "• 3rd+"):
+                    name = line.strip()
+                    if name.lower() in skip_words or len(name) < 3:
+                        i += 1
+                        continue
+
+                    person: dict[str, Any] = {
+                        "platform": "linkedin",
+                        "name": name,
+                        "company": company,
+                    }
+
+                    # URL
+                    for known_name, url in name_to_url.items():
+                        if name in known_name or known_name in name:
+                            person["linkedin_url"] = url
+                            break
+
+                    # Title: next non-trivial line after degree indicator
+                    for j in range(i + 2, min(i + 6, len(lines))):
+                        candidate = lines[j]
+                        if (
+                            candidate.lower() not in skip_words
+                            and candidate not in ("Connect", "Follow", "Message")
+                            and len(candidate) > 5
+                        ):
+                            person["title"] = candidate
+                            break
+
+                    # Location: line with comma
+                    for j in range(i + 2, min(i + 6, len(lines))):
+                        candidate = lines[j]
+                        if "," in candidate and candidate != person.get("title"):
+                            person["location"] = candidate
+                            break
+
+                    # Company filter
+                    title_lower = (person.get("title") or "").lower()
+                    company_match = co_lower in title_lower
+                    if not company_match and first_word and len(first_word) > 2:
+                        company_match = first_word in title_lower
+
+                    if company_match and person.get("linkedin_url"):
+                        people.append(person)
+                        logger.debug(
+                            "Text-fallback: found person",
+                            name=name,
+                            title=person.get("title"),
+                        )
+
+                    i += 3  # Skip past this person block
+                    continue
+                i += 1
+
+        except Exception as e:
+            logger.warning("Body text people extraction failed", error=str(e))
         return people
 
     def search_people(
@@ -695,9 +819,12 @@ class LinkedInService:
             # Find people result cards
             list_selectors = [
                 ".reusable-search__result-container",
-                ".search-results-container li",
                 "li.reusable-search__result-container",
                 ".entity-result",
+                ".search-results-container li",
+                "[data-view-name='search-entity-result-universal-template']",
+                "div[class*='entity-result']",
+                "li[class*='search-result']",
             ]
 
             results = []
@@ -728,9 +855,20 @@ class LinkedInService:
                         "message": f"Found {len(people)} people at {company}",
                     }
 
-                # Retry with just company name (broader search)
-                # is removed — it returns random employees, not recruiters.
-                # Instead, just report no results found.
+                # Link-based failed too — try text-based extraction
+                people = self._extract_people_from_body_text(driver, company)
+                if people:
+                    logger.info(
+                        "Extracted people via body text fallback",
+                        count=len(people),
+                    )
+                    return {
+                        "success": True,
+                        "connected": True,
+                        "people": people,
+                        "message": f"Found {len(people)} people at {company}",
+                    }
+
                 logger.warning(
                     "No people search results found",
                     query=query,

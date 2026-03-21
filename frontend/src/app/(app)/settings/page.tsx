@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useAuthStore } from "@/stores/authStore";
 import toast from "react-hot-toast";
-import { authApi, onboardingApi } from "@/lib/api";
+import { authApi, onboardingApi, targetCompaniesApi } from "@/lib/api";
 import { useTheme } from "@/components/ThemeProvider";
 
 interface CredentialStatus {
@@ -89,6 +89,12 @@ export default function SettingsPage() {
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
+  // Job Search Mode
+  const [companySearchEnabled, setCompanySearchEnabled] = useState(false);
+  const [linkedinSearchEnabled, setLinkedinSearchEnabled] = useState(true);
+  const [autoApplyThreshold, setAutoApplyThreshold] = useState("");
+  const [searchModeSaving, setSearchModeSaving] = useState(false);
+
   // Initialize from user profile
   useEffect(() => {
     if (user) {
@@ -117,6 +123,10 @@ export default function SettingsPage() {
         const all = Object.values(user.classified_skills).flat();
         setRawSkills(all);
       }
+      // Job search mode
+      setCompanySearchEnabled(user.company_search_enabled ?? false);
+      setLinkedinSearchEnabled(user.linkedin_search_enabled ?? true);
+      setAutoApplyThreshold(user.auto_apply_threshold != null ? String(user.auto_apply_threshold) : "");
     }
   }, [user]);
 
@@ -357,6 +367,25 @@ export default function SettingsPage() {
       toast.error("Failed to save skills");
     } finally {
       setSkillsSaving(false);
+    }
+  };
+
+  // ── Job Search Mode ───────────────────────────────────────────
+
+  const handleSaveSearchMode = async () => {
+    setSearchModeSaving(true);
+    try {
+      await targetCompaniesApi.updateSettings({
+        company_search_enabled: companySearchEnabled,
+        linkedin_search_enabled: linkedinSearchEnabled,
+        auto_apply_threshold: autoApplyThreshold ? parseFloat(autoApplyThreshold) : null,
+      });
+      await refreshUser();
+      toast.success("Search mode updated");
+    } catch {
+      toast.error("Failed to update search mode");
+    } finally {
+      setSearchModeSaving(false);
     }
   };
 
@@ -899,6 +928,73 @@ export default function SettingsPage() {
           className="btn-primary"
         >
           {prefSaving ? "Saving..." : "Save Preferences"}
+        </button>
+      </div>
+
+      {/* ── Job Search Mode ──────────────────────────────────── */}
+      <div className="card space-y-4">
+        <h2 className="text-lg font-semibold text-[var(--foreground)]">Job Search Mode</h2>
+        <p className="text-sm text-[var(--muted-foreground)]">
+          Choose how jobs are discovered. You can use LinkedIn, company career pages, or both.
+        </p>
+        <div className="space-y-3">
+          <div className="flex items-center justify-between rounded-lg border border-[var(--border)] p-3">
+            <div>
+              <p className="font-medium text-[var(--foreground)]">LinkedIn Search</p>
+              <p className="text-xs text-[var(--muted-foreground)]">Search for jobs via LinkedIn, Indeed, and other job boards</p>
+            </div>
+            <button
+              onClick={() => setLinkedinSearchEnabled(!linkedinSearchEnabled)}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                linkedinSearchEnabled ? "bg-brand-600" : "bg-gray-300 dark:bg-gray-600"
+              }`}
+            >
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                linkedinSearchEnabled ? "translate-x-6" : "translate-x-1"
+              }`} />
+            </button>
+          </div>
+          <div className="flex items-center justify-between rounded-lg border border-[var(--border)] p-3">
+            <div>
+              <p className="font-medium text-[var(--foreground)]">Company Career Page Search</p>
+              <p className="text-xs text-[var(--muted-foreground)]">Automatically scrape career pages of your target companies</p>
+            </div>
+            <button
+              onClick={() => setCompanySearchEnabled(!companySearchEnabled)}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                companySearchEnabled ? "bg-brand-600" : "bg-gray-300 dark:bg-gray-600"
+              }`}
+            >
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                companySearchEnabled ? "translate-x-6" : "translate-x-1"
+              }`} />
+            </button>
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium text-[var(--foreground)]">
+              Auto-Apply Threshold (match score %)
+            </label>
+            <input
+              type="number"
+              min="0"
+              max="100"
+              step="5"
+              value={autoApplyThreshold}
+              onChange={(e) => setAutoApplyThreshold(e.target.value)}
+              className="input w-40"
+              placeholder="e.g. 80"
+            />
+            <p className="mt-1 text-xs text-[var(--muted-foreground)]">
+              Automatically apply when job match score exceeds this percentage. Leave blank to disable auto-apply.
+            </p>
+          </div>
+        </div>
+        <button
+          onClick={handleSaveSearchMode}
+          disabled={searchModeSaving}
+          className="btn-primary"
+        >
+          {searchModeSaving ? "Saving..." : "Save Search Mode"}
         </button>
       </div>
 

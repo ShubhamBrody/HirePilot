@@ -36,6 +36,10 @@ interface User {
   remote_preference: string | null;
   willing_to_relocate: boolean | null;
   job_type_preference: string | null;
+  // Company search fields
+  auto_apply_threshold: number | null;
+  company_search_enabled: boolean;
+  linkedin_search_enabled: boolean;
 }
 
 interface AuthState {

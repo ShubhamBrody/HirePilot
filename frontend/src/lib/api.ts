@@ -304,4 +304,27 @@ export const trashApi = {
   empty: () => api.delete("/trash"),
 };
 
+// ---------- Target Companies ----------
+export const targetCompaniesApi = {
+  list: (params?: { skip?: number; limit?: number; enabled_only?: boolean }) =>
+    api.get("/target-companies", { params }),
+  add: (data: { company_name: string; career_page_url?: string; scrape_frequency_hours?: number }) =>
+    api.post("/target-companies", data),
+  update: (id: string, data: { company_name?: string; career_page_url?: string; is_enabled?: boolean; scrape_frequency_hours?: number }) =>
+    api.put(`/target-companies/${id}`, data),
+  delete: (id: string) => api.delete(`/target-companies/${id}`),
+  bulkAdd: (data: { company_names: string[]; scrape_frequency_hours?: number }) =>
+    api.post("/target-companies/bulk", data),
+  discoverUrl: (id: string) =>
+    api.post(`/target-companies/${id}/discover-url`),
+  scrape: (id: string) =>
+    api.post(`/target-companies/${id}/scrape`),
+  scrapingLogs: (id: string, params?: { skip?: number; limit?: number }) =>
+    api.get(`/target-companies/${id}/scraping-logs`, { params }),
+  updateSettings: (data: { company_search_enabled?: boolean; linkedin_search_enabled?: boolean; auto_apply_threshold?: number | null }) =>
+    api.patch("/target-companies/settings", data),
+  activity: (params?: { limit?: number }) =>
+    api.get("/target-companies/activity", { params }),
+};
+
 export default api;

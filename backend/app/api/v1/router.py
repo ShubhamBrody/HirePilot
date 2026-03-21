@@ -18,6 +18,7 @@ from app.api.v1.endpoints import (
     recruiters,
     resumes,
     subscription,
+    target_companies,
     trash,
 )
 
@@ -37,3 +38,4 @@ api_router.include_router(orchestrator.router, prefix="/orchestrator", tags=["Or
 api_router.include_router(admin.router, prefix="/admin", tags=["Admin"])
 api_router.include_router(trash.router, prefix="/trash", tags=["Trash"])
 api_router.include_router(subscription.router, prefix="/subscription", tags=["Subscription"])
+api_router.include_router(target_companies.router, prefix="/target-companies", tags=["Target Companies"])

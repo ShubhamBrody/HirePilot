@@ -134,6 +134,12 @@ export default function JobsPage() {
     try {
       const { data } = await jobsApi.getMatchScore(jobId);
       setFitReport(data);
+      // Update the job in local state so the score renders immediately
+      setJobs((prev) =>
+        prev.map((j) =>
+          j.id === jobId ? { ...j, match_score: data.match_score, match_reasoning: data.reasoning } : j
+        )
+      );
     } catch {
       toast.error("Failed to compute fit score");
     } finally {

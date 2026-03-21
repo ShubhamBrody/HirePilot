@@ -22,20 +22,47 @@ logger = get_logger(__name__)
 # ── System Prompts ────────────────────────────────────────────────
 
 RESUME_ANALYSIS_SYSTEM_PROMPT = """You are an expert resume writer and ATS optimization specialist.
-You analyze job descriptions to extract key requirements and optimize resumes
-for maximum ATS compatibility and recruiter appeal.
 
-Critical rules:
-1. NEVER fabricate experience, skills, or achievements
-2. NEVER change dates, company names, or educational credentials
-3. NEVER invent statistics, metrics, or accomplishments not present in the original
-4. Only reword existing experience to better match job requirements
-5. Highlight relevant skills that the candidate actually has
-6. Reorder sections to put the most relevant experience first
-7. Use keywords from the job description naturally in bullet points
-8. Quantify achievements ONLY where the original resume already provides data
-9. Maintain the candidate's voice and authenticity
-10. When in doubt, keep the original wording rather than risk fabrication
+THE MASTER RESUME IS YOUR SOP — it is the GROUND TRUTH.
+You may ONLY ADD to it or MODIFY existing bullet text. You must NEVER REMOVE anything.
+
+RULE 1 — NEVER REMOVE ANYTHING (ZERO TOLERANCE):
+  - Every \\section in the master MUST appear in the output.
+  - Every \\resumeSubheading (experience entry) MUST appear.
+  - Every \\resumeProjectHeading (project entry) MUST appear.
+  - Every \\resumeItem (bullet point) MUST appear (modified text is OK).
+  - Do NOT add new sections that duplicate existing ones
+    (e.g., if "Technical Skills" exists, do NOT add a separate "Skills" section).
+
+RULE 2 — PRESERVE EXACT LaTeX STRUCTURE:
+  - If a section uses raw \\begin{itemize}...\\end{itemize}, keep that exact format.
+    Do NOT convert it to \\resumeSubHeadingListStart/\\resumeItemListStart.
+  - If a section uses \\resumeSubHeadingListStart, keep that exact format.
+  - Preserve the EXACT preamble: \\documentclass, \\usepackage, \\newcommand lines.
+  - Do NOT add new \\usepackage or \\newcommand lines.
+
+RULE 3 — IMMUTABLE FACTS:
+  - Company names, job titles, employment dates: COPY EXACTLY.
+  - Education: institution, degree, dates, GPA: COPY EXACTLY.
+  - Project names and tech stacks in project headers: COPY EXACTLY.
+  - Contact info (name, email, phone, URLs): COPY EXACTLY.
+  - Numerical metrics/stats from the original (percentages, counts): PRESERVE.
+  - GitHub links: COPY EXACTLY.
+
+RULE 4 — WHAT YOU CAN MODIFY:
+  a) REORDER sections by relevance to the target role.
+  b) REORDER entries within a section by relevance.
+  c) REORDER bullet points within an entry by relevance.
+  d) REWRITE bullet text under Experience to match job requirements.
+     You MAY fabricate/embellish work descriptions under existing companies.
+  e) ENHANCE project bullet text to highlight relevant aspects.
+     Keep original meaning — don't turn an AI Trading project into something unrelated.
+  f) ADD new bullet points to any existing entry.
+  g) ADD new skills/keywords to the Technical Skills / Skills section.
+
+RULE 5 — KEYWORD STRATEGY:
+  - Weave JD keywords into Experience bullets and Skills subtly.
+  - Not keyword-stuffed — integrated naturally into sentences.
 """
 
 JD_ANALYSIS_PROMPT = """Analyze this job description and extract structured information.
@@ -58,7 +85,7 @@ Return ONLY valid JSON, no markdown or explanation."""
 
 RESUME_TAILOR_PROMPT = """Tailor this LaTeX resume for the given job description.
 
-MASTER RESUME (LaTeX):
+MASTER RESUME (LaTeX — this is the SOP, do NOT remove anything from it):
 {master_resume}
 
 JOB DESCRIPTION ANALYSIS:
@@ -69,26 +96,35 @@ TARGET ROLE: {role}
 
 {additional_instructions}
 
-Instructions:
-1. Rewrite bullet points to incorporate relevant ATS keywords naturally
-2. Reorder experience sections to highlight the most relevant work first
-3. Emphasize matching skills in the skills section
-4. Adjust the professional summary (if present) to align with the role
-5. Keep ALL factual information unchanged: dates, company names, job titles, degrees, GPAs, certifications
-6. NEVER fabricate statistics, metrics, or accomplishments not in the original
-7. Add any skills the candidate actually has that match the JD keywords
-8. When in doubt, keep the original wording
+RULES — follow ALL of these:
+1. Do NOT remove ANY section, bullet point, project entry, or experience entry.
+2. Do NOT add sections that duplicate existing ones (e.g., no "Skills" if "Technical Skills" exists).
+3. PRESERVE the exact LaTeX formatting of each section — if a section uses raw
+   \\begin{{itemize}}...\\end{{itemize}}, keep it that way. Do NOT convert to
+   \\resumeSubHeadingListStart/\\resumeItemListStart or vice versa.
+4. PRESERVE all numerical metrics/stats from the original (percentages, counts, etc.).
+5. PRESERVE all GitHub links exactly as they appear.
+6. REORDER sections, entries, and bullets by relevance to the target role.
+7. MODIFY experience bullet points — rewrite/embellish to match the JD.
+8. ENHANCE project bullet text to highlight relevant aspects (keep original meaning).
+9. ADD new bullet points to existing entries if needed.
+10. ADD new skills to the Skills section that match the JD.
+11. ADD ATS keywords from the JD into existing content naturally and subtly.
+12. Keep ALL immutable facts: dates, company names, job titles, degrees, GPAs, contact info.
 
 LATEX RULES:
-- Preserve the exact \\documentclass line and all \\usepackage declarations from the original
-- Ensure every \\begin{{...}} has a matching \\end{{...}}
+- Preserve the exact \\documentclass line and all \\usepackage/\\newcommand declarations.
+- Ensure every \\begin{{...}} has a matching \\end{{...}}.
 - Escape special characters: %, $, &, #, _ must be \\%, \\$, \\&, \\#, \\_
-- Start with \\documentclass and end with \\end{{document}}
-- Do NOT add new packages not present in the original
+- Start with \\documentclass and end with \\end{{document}}.
+- Do NOT add new packages or custom commands not present in the original.
+
+FINAL CHECK: Count sections, experience entries, project entries and bullets.
+They must ALL be >= the master. If anything is missing, ADD IT BACK.
 
 Return ONLY the complete tailored LaTeX source code.
 Do NOT include markdown code blocks or explanations.
-Start directly with \\documentclass or the first LaTeX command."""
+Start directly with \\documentclass."""
 
 CHANGES_SUMMARY_PROMPT = """Compare these two resume versions and summarize the changes made.
 
@@ -196,7 +232,14 @@ class ResumeTailoringService:
         # Clean up any potential markdown formatting
         if tailored_latex.startswith("```"):
             lines = tailored_latex.split("\n")
-            tailored_latex = "\n".join(lines[1:-1])
+            lines = [l for l in lines if not l.strip().startswith("```")]
+            tailored_latex = "\n".join(lines).strip()
+
+        # Structural validation: splice back anything the LLM dropped
+        from app.services.llm_service import LLMService
+        tailored_latex = LLMService._validate_structure_preserved(
+            master_resume_latex, tailored_latex
+        )
 
         # Step 3: Generate changes summary
         logger.info("Generating changes summary")

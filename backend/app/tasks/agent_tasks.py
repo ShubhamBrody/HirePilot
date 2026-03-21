@@ -153,3 +153,29 @@ def run_linkedin_reply_periodic():
 
     count = _run_async(_run())
     logger.info("Periodic LinkedIn reply dispatched", users=count)
+
+
+@celery_app.task(name="app.tasks.agent_tasks.run_company_search_periodic")
+def run_company_search_periodic():
+    """Periodic: scrape company career pages for users with company_search_enabled."""
+    logger.info("Periodic company career search starting")
+
+    async def _run():
+        from sqlalchemy import select
+
+        from app.core.database import async_session_factory
+        from app.models.user import User
+
+        async with async_session_factory() as db:
+            stmt = select(User).where(
+                User.is_active.is_(True),
+                User.company_search_enabled.is_(True),
+            )
+            result = await db.execute(stmt)
+            users = list(result.scalars().all())
+            for user in users:
+                run_agent.delay("company_search", str(user.id), {})
+            return len(users)
+
+    count = _run_async(_run())
+    logger.info("Periodic company career search dispatched", users=count)

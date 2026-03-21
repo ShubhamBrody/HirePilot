@@ -59,6 +59,11 @@ class User(Base):
     # Gmail integration (encrypted refresh token)
     gmail_refresh_token: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # ── Company career search settings ───────────────────────────
+    auto_apply_threshold: Mapped[float | None] = mapped_column(Float, nullable=True)  # 0.0-1.0
+    company_search_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
+    linkedin_search_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, server_default="true")
+
     # ── Onboarding questionnaire fields ──────────────────────────
 
     # Personal information
@@ -121,6 +126,7 @@ class User(Base):
     work_experiences = relationship("WorkExperience", back_populates="user", lazy="selectin", order_by="WorkExperience.sort_order")
     educations = relationship("Education", back_populates="user", lazy="selectin", order_by="Education.sort_order")
     audit_logs = relationship("AuditLog", back_populates="user", lazy="noload")
+    target_companies = relationship("TargetCompany", lazy="noload", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
         return f"<User {self.email}>"

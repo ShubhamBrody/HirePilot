@@ -326,6 +326,215 @@ class NaukriScraper(BaseScraper):
         return jobs
 
 
+# ── Company Career Page Scraper ───────────────────────────────────
+
+CAREER_PAGE_ANALYSIS_SYSTEM = (
+    "You are a web scraping expert analyzing a company career/jobs page.\n"
+    "Given the HTML of a career page, identify the structure of job listings.\n\n"
+    "Return ONLY valid JSON with:\n"
+    '{"jobs": [{"title": "string", "location": "string or null", '
+    '"url": "string (absolute URL to job detail page)", '
+    '"department": "string or null", "posted_date": "string or null"}], '
+    '"pagination": {"has_next": bool, "next_url": "string or null"}, '
+    '"total_found": int or null}\n\n'
+    "RULES:\n"
+    "- Extract ALL visible job listings from the HTML\n"
+    "- URLs must be absolute (prepend the base domain if relative)\n"
+    "- If no jobs are found, return {\"jobs\": [], \"pagination\": {\"has_next\": false}, \"total_found\": 0}\n"
+    "- Return ONLY JSON — no markdown fences, no commentary"
+)
+
+JOB_DETAIL_SYSTEM = (
+    "You are a job listing parser. Extract the full job details from this HTML.\n"
+    "Return ONLY valid JSON with:\n"
+    '{"title": "string", "company": "string", "location": "string or null", '
+    '"description": "string (full job description text)", '
+    '"requirements": "string or null", "skills": ["skill1", "skill2"], '
+    '"experience_required": "string or null", "salary_range": "string or null", '
+    '"remote_type": "string or null", "department": "string or null"}\n'
+    "Return ONLY JSON — no markdown fences, no commentary."
+)
+
+
+class CompanyCareerScraper(BaseScraper):
+    """
+    Company career page scraper using Selenium + LLM for page analysis.
+
+    Works for any company career page by using LLM to understand the page
+    structure dynamically, rather than relying on fixed CSS selectors.
+    """
+
+    source = JobSource.COMPANY_CAREER
+
+    def __init__(
+        self,
+        career_url: str,
+        company_name: str,
+        strategy: dict | None = None,
+    ):
+        self.career_url = career_url
+        self.company_name = company_name
+        self.strategy = strategy or {}
+
+    async def scrape(
+        self, filters: JobSearchFilters, user_id: str
+    ) -> list[dict[str, Any]]:
+        """Scrape jobs from a company career page."""
+        if not HAS_SELENIUM:
+            logger.warning("Selenium not available, skipping company career scrape")
+            return []
+
+        from app.services.llm_service import LLMService
+        from app.services.scraping_intelligence import ScrapingIntelligence
+
+        llm = LLMService()
+        jobs: list[dict[str, Any]] = []
+
+        try:
+            # Anti-abuse: check robots.txt first
+            robots = await ScrapingIntelligence.check_robots_txt(self.career_url)
+            if not robots.get("allowed", True):
+                logger.warning(
+                    "Career page blocked by robots.txt",
+                    url=self.career_url,
+                    company=self.company_name,
+                )
+                return []
+
+            # Load the career page with Selenium
+            html = await self._load_page_with_selenium(self.career_url)
+            if not html:
+                return []
+
+            # Use LLM to analyze the page and extract job listings
+            from urllib.parse import urlparse
+            parsed_url = urlparse(self.career_url)
+            base_domain = f"{parsed_url.scheme}://{parsed_url.netloc}"
+
+            prompt = (
+                f"Base domain: {base_domain}\n"
+                f"Company: {self.company_name}\n\n"
+                f"Career page HTML (first 12000 chars):\n{html[:12000]}"
+            )
+
+            try:
+                analysis = await llm.generate_json(prompt, system=CAREER_PAGE_ANALYSIS_SYSTEM)
+            except Exception as e:
+                logger.error("LLM career page analysis failed", error=str(e))
+                return []
+
+            if not isinstance(analysis, dict):
+                return []
+
+            raw_jobs = analysis.get("jobs", [])
+            logger.info(
+                "Career page analysis complete",
+                company=self.company_name,
+                jobs_found=len(raw_jobs),
+            )
+
+            # For each job, fetch the detail page and extract full description
+            for i, raw in enumerate(raw_jobs[:filters.max_results]):
+                job_url = raw.get("url", "")
+                if not job_url:
+                    continue
+
+                # Make URL absolute if relative
+                if job_url.startswith("/"):
+                    job_url = f"{base_domain}{job_url}"
+                elif not job_url.startswith("http"):
+                    job_url = f"{base_domain}/{job_url}"
+
+                # Rate limiting: random delay between requests
+                delay = ScrapingIntelligence.get_random_delay(2.0, 5.0)
+                await asyncio.sleep(delay)
+
+                # Fetch job detail page
+                description = ""
+                requirements = None
+                skills_list = []
+                try:
+                    detail_html = await self._load_page_with_selenium(job_url)
+                    if detail_html:
+                        detail_prompt = (
+                            f"Company: {self.company_name}\n\n"
+                            f"Job detail page HTML (first 10000 chars):\n{detail_html[:10000]}"
+                        )
+                        detail = await llm.generate_json(detail_prompt, system=JOB_DETAIL_SYSTEM)
+                        if isinstance(detail, dict):
+                            description = detail.get("description", "")
+                            requirements = detail.get("requirements")
+                            skills_list = detail.get("skills", [])
+                except Exception as e:
+                    logger.warning("Failed to fetch job detail", url=job_url, error=str(e))
+
+                title = raw.get("title", "Unknown")
+                location = raw.get("location")
+
+                jobs.append(self._normalize_job(
+                    title=title,
+                    company=self.company_name,
+                    location=location,
+                    description=description or f"{title} at {self.company_name}",
+                    source_url=job_url,
+                    user_id=user_id,
+                    requirements=requirements,
+                    technologies=json.dumps(skills_list) if skills_list else None,
+                ))
+
+        except Exception as e:
+            logger.error(
+                "Company career scraping failed",
+                company=self.company_name,
+                url=self.career_url,
+                error=str(e),
+            )
+
+        logger.info(
+            "Company career scrape complete",
+            company=self.company_name,
+            jobs_found=len(jobs),
+        )
+        return jobs
+
+    async def _load_page_with_selenium(self, url: str) -> str | None:
+        """Load a page with Selenium and return clean HTML."""
+        from app.services.scraping_intelligence import ScrapingIntelligence
+
+        try:
+            chrome_options = ChromeOptions()
+            chrome_options.add_argument("--headless")
+            chrome_options.add_argument("--no-sandbox")
+            chrome_options.add_argument("--disable-dev-shm-usage")
+            chrome_options.add_argument(f"user-agent={ScrapingIntelligence.get_random_user_agent()}")
+
+            def _load_sync() -> str:
+                driver = webdriver.Remote(
+                    command_executor=settings.selenium_url,
+                    options=chrome_options,
+                )
+                try:
+                    driver.get(url)
+                    driver.implicitly_wait(8)
+
+                    # Scroll to trigger lazy loading
+                    for _ in range(3):
+                        driver.execute_script("window.scrollTo(0, document.body.scrollHeight)")
+                        import time
+                        time.sleep(random.uniform(1.0, 2.0))
+
+                    return driver.page_source
+                finally:
+                    driver.quit()
+
+            html = await asyncio.get_event_loop().run_in_executor(None, _load_sync)
+            return html
+
+        except Exception as e:
+            logger.error("Selenium page load failed", url=url, error=str(e))
+            return None
+
+
 # ── Job Scraper Orchestrator ──────────────────────────────────────
 
 class JobScraperOrchestrator:
@@ -340,6 +549,7 @@ class JobScraperOrchestrator:
         JobSource.LINKEDIN: LinkedInScraper,
         JobSource.INDEED: IndeedScraper,
         JobSource.NAUKRI: NaukriScraper,
+        JobSource.COMPANY_CAREER: CompanyCareerScraper,
     }
 
     def __init__(self) -> None:

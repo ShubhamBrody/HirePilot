@@ -157,6 +157,7 @@ class SeleniumApplicationBot:
         resume_pdf_path: str,
         user_profile: dict[str, str],
         cover_letter: str | None = None,
+        linkedin_credentials: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """
         Execute the full job application flow.
@@ -166,6 +167,7 @@ class SeleniumApplicationBot:
             resume_pdf_path: Local path to the resume PDF file
             user_profile: Dict with user's info (full_name, email, phone, etc.)
             cover_letter: Optional cover letter text
+            linkedin_credentials: Optional dict {"username": ..., "password": ...} for LinkedIn login
 
         Returns:
             Dict with status, action_log, and any errors
@@ -182,6 +184,21 @@ class SeleniumApplicationBot:
         try:
             driver = self._get_driver()
             self._log("init", "Browser started")
+
+            # Step 0: Log in to LinkedIn if credentials provided and URL is LinkedIn
+            if linkedin_credentials and "linkedin.com" in job_url:
+                login_result = self._login_to_linkedin(
+                    driver,
+                    linkedin_credentials["username"],
+                    linkedin_credentials["password"],
+                )
+                if not login_result.get("success"):
+                    result["status"] = "login_failed"
+                    result["error"] = login_result.get("message", "LinkedIn login failed")
+                    self._save_screenshot(driver, "login_failed")
+                    return result
+                self._log("login", login_result.get("message", "Logged in"))
+                self._wait(1.0, 2.0)
 
             # Step 1: Navigate to job page
             self._log("navigate", f"Opening {job_url}")
@@ -231,6 +248,26 @@ class SeleniumApplicationBot:
                         result["status"] = "error"
                         result["error"] = f"Could not click Apply button: {e}"
                         return result
+            else:
+                # No apply button identified by LLM — try common selectors
+                clicked = self._try_common_apply_buttons(driver)
+                if clicked:
+                    self._wait(2.0, 3.0)
+
+            # After clicking apply, wait for the application modal/form to appear
+            # LinkedIn Easy Apply uses a modal overlay
+            is_linkedin = "linkedin.com" in job_url
+            if is_linkedin:
+                try:
+                    WebDriverWait(driver, 8).until(
+                        EC.presence_of_element_located(
+                            (By.CSS_SELECTOR, "div.jobs-easy-apply-modal, div[class*='easy-apply'], div.artdeco-modal")
+                        )
+                    )
+                    self._log("modal_detected", "Easy Apply modal opened")
+                    self._wait(1.0, 2.0)
+                except Exception:
+                    self._log("modal_warning", "No Easy Apply modal detected — proceeding with page")
 
             # Step 4: Handle multi-step application form
             max_steps = 12
@@ -238,8 +275,8 @@ class SeleniumApplicationBot:
                 self._log("form_step", f"Processing form step {step + 1}")
                 self._wait(1.5, 2.5)
 
-                # Get current page HTML
-                form_html = self._get_clean_html(driver)
+                # Get current form HTML — prefer modal content if present (LinkedIn)
+                form_html = self._get_form_html(driver, is_linkedin)
 
                 # Check if we've reached a success page
                 success_check = self._run_async(self._analyze_page_type(form_html))
@@ -434,12 +471,10 @@ class SeleniumApplicationBot:
     def _try_common_apply_buttons(self, driver: Any) -> bool:
         """Try clicking common Apply button selectors."""
         selectors = [
-            "button[data-control-name*='apply']",
             "button.jobs-apply-button",
+            "button[data-control-name*='apply']",
             "a[data-tracking-control-name*='apply']",
-            "button:has-text('Apply')",
-            "a:has-text('Apply Now')",
-            "button:has-text('Easy Apply')",
+            "[class*='jobs-apply-button']",
             "[class*='apply-button']",
             "[class*='applyButton']",
         ]
@@ -452,7 +487,37 @@ class SeleniumApplicationBot:
                     return True
             except Exception:
                 continue
+
+        # Try by text content using XPath
+        xpath_attempts = [
+            "//button[contains(., 'Easy Apply')]",
+            "//button[contains(., 'Apply')]",
+            "//a[contains(., 'Apply')]",
+            "//span[contains(., 'Easy Apply')]/ancestor::button",
+        ]
+        for xpath in xpath_attempts:
+            try:
+                btn = driver.find_element(By.XPATH, xpath)
+                if btn.is_displayed():
+                    btn.click()
+                    self._log("fallback_apply", f"Clicked apply via XPath: {xpath}")
+                    return True
+            except Exception:
+                continue
+
         return False
+
+    def _login_to_linkedin(
+        self, driver: Any, username: str, password: str
+    ) -> dict[str, Any]:
+        """
+        Log in to LinkedIn using LinkedInService's login infrastructure
+        (cookie persistence, challenge handling, etc.).
+        """
+        from app.services.linkedin_service import LinkedInService
+
+        li_service = LinkedInService()
+        return li_service._login(driver, username, password)
 
     def _try_common_next_buttons(self, driver: Any) -> bool:
         """Try clicking common Next/Submit buttons."""
@@ -461,9 +526,7 @@ class SeleniumApplicationBot:
             "button[aria-label*='Submit']",
             "button[aria-label*='Next']",
             "button[aria-label*='Continue']",
-            "button:has-text('Submit')",
-            "button:has-text('Next')",
-            "button:has-text('Continue')",
+            "button[aria-label*='Review']",
             "[class*='submit']",
         ]
         for sel in selectors:
@@ -475,6 +538,26 @@ class SeleniumApplicationBot:
                     return True
             except Exception:
                 continue
+
+        # XPath fallback for text-based matching
+        xpath_attempts = [
+            "//button[contains(., 'Submit')]",
+            "//button[contains(., 'Next')]",
+            "//button[contains(., 'Continue')]",
+            "//button[contains(., 'Review')]",
+            "//span[contains(., 'Submit')]/ancestor::button",
+            "//span[contains(., 'Next')]/ancestor::button",
+        ]
+        for xpath in xpath_attempts:
+            try:
+                btn = driver.find_element(By.XPATH, xpath)
+                if btn.is_displayed():
+                    btn.click()
+                    self._log("fallback_next", f"Clicked next via XPath: {xpath}")
+                    return True
+            except Exception:
+                continue
+
         return False
 
     def _try_fill_cover_letter(self, driver: Any, cover_letter: str) -> None:
@@ -496,6 +579,34 @@ class SeleniumApplicationBot:
                     return
             except Exception:
                 continue
+
+    def _get_form_html(self, driver: Any, is_linkedin: bool = False) -> str:
+        """
+        Get HTML from the active form context.
+        For LinkedIn, try to extract just the Easy Apply modal content
+        to give the LLM cleaner, more focused HTML.
+        """
+        if is_linkedin:
+            modal_selectors = [
+                "div.jobs-easy-apply-modal",
+                "div[class*='easy-apply']",
+                "div.artdeco-modal",
+                "div[role='dialog']",
+            ]
+            for sel in modal_selectors:
+                try:
+                    modal = driver.find_element(By.CSS_SELECTOR, sel)
+                    html = modal.get_attribute("innerHTML")
+                    if html and len(html) > 100:
+                        import re
+                        html = re.sub(r"<script[^>]*>.*?</script>", "", html, flags=re.DOTALL)
+                        html = re.sub(r"<style[^>]*>.*?</style>", "", html, flags=re.DOTALL)
+                        html = re.sub(r"\s+", " ", html)
+                        return html[:15000]
+                except Exception:
+                    continue
+
+        return self._get_clean_html(driver)
 
     def _get_clean_html(self, driver: Any) -> str:
         """Get a cleaned version of the page HTML for LLM analysis."""

@@ -68,7 +68,7 @@ class Recruiter(Base):
 
     # Relationships
     job_listing = relationship("JobListing", back_populates="recruiters")
-    messages = relationship("OutreachMessage", back_populates="recruiter", lazy="selectin")
+    messages = relationship("OutreachMessage", back_populates="recruiter", lazy="selectin", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
         return f"<Recruiter {self.name} @ {self.company}>"

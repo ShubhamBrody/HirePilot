@@ -131,7 +131,8 @@ def auto_apply_job(
                 try:
                     from app.services.latex_compiler import LatexCompilerService
                     compiler = LatexCompilerService()
-                    pdf_bytes = await compiler.compile_latex(resume.latex_source)
+                    compile_result = await compiler.compile(resume.latex_source)
+                    pdf_bytes = compile_result.get("pdf_data") if compile_result.get("success") else None
                     if pdf_bytes:
                         import os
                         tmp = tempfile.NamedTemporaryFile(
@@ -195,11 +196,24 @@ def auto_apply_job(
 
             # Run Selenium bot
             bot = SeleniumApplicationBot()
+
+            # Load LinkedIn credentials for auto-login
+            linkedin_creds = None
+            if "linkedin.com" in (job.source_url or ""):
+                try:
+                    from app.agents.linkedin_helper import get_linkedin_credentials
+                    linkedin_creds = await get_linkedin_credentials(session, user_id)
+                    if not linkedin_creds:
+                        logger.warning("No LinkedIn credentials configured — bot may fail on login-gated pages")
+                except Exception as e:
+                    logger.warning("Could not load LinkedIn credentials", error=str(e))
+
             result = bot.apply_to_job(
                 job_url=job.source_url,
                 resume_pdf_path=resume_pdf_path,
                 user_profile=user_profile,
                 cover_letter=cover_letter,
+                linkedin_credentials=linkedin_creds,
             )
 
             # Clean up temp file

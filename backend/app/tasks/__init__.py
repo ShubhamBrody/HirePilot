@@ -85,7 +85,19 @@ celery_app.conf.beat_schedule = {
         "schedule": crontab(minute=15),  # Every hour at :15
         "args": (),
     },
+    "company-career-scrape-periodic": {
+        "task": "app.tasks.agent_tasks.run_company_search_periodic",
+        "schedule": crontab(minute=45),  # Every hour at :45
+        "args": (),
+    },
 }
 
 # ---------- Auto-discover tasks ----------
-celery_app.autodiscover_tasks(["app.tasks"])
+# Explicitly import task modules so Celery registers decorated functions.
+# autodiscover_tasks expects a "tasks.py" inside each package, which doesn't
+# match our layout (peer modules inside app.tasks).
+import app.tasks.scraping  # noqa: F401, E402
+import app.tasks.ai_tasks  # noqa: F401, E402
+import app.tasks.automation  # noqa: F401, E402
+import app.tasks.outreach  # noqa: F401, E402
+import app.tasks.agent_tasks  # noqa: F401, E402

@@ -70,6 +70,9 @@ PLAN_CONFIGS = {
         "ai_tailoring_enabled": False,
         "recruiter_outreach_enabled": False,
         "autonomous_mode_enabled": False,
+        "max_target_companies": 3,
+        "min_scrape_frequency_hours": 24,
+        "career_search_enabled": True,
     },
     "pro": {
         "price_monthly": 9.99,
@@ -79,6 +82,9 @@ PLAN_CONFIGS = {
         "ai_tailoring_enabled": True,
         "recruiter_outreach_enabled": True,
         "autonomous_mode_enabled": False,
+        "max_target_companies": 15,
+        "min_scrape_frequency_hours": 12,
+        "career_search_enabled": True,
     },
     "enterprise": {
         "price_monthly": 29.99,
@@ -88,5 +94,8 @@ PLAN_CONFIGS = {
         "ai_tailoring_enabled": True,
         "recruiter_outreach_enabled": True,
         "autonomous_mode_enabled": True,
+        "max_target_companies": 9999,  # effectively unlimited
+        "min_scrape_frequency_hours": 6,
+        "career_search_enabled": True,
     },
 }

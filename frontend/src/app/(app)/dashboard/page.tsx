@@ -14,7 +14,7 @@ import {
   FiDollarSign,
   FiActivity,
 } from "react-icons/fi";
-import { applicationsApi, jobsApi, insightsApi } from "@/lib/api";
+import { applicationsApi, jobsApi, insightsApi, targetCompaniesApi } from "@/lib/api";
 
 interface Stats {
   total_jobs: number;
@@ -84,6 +84,18 @@ export default function DashboardPage() {
   const [hiringLoading, setHiringLoading] = useState(true);
   const [salaryAnalysis, setSalaryAnalysis] = useState<SalaryAnalysis | null>(null);
   const [salaryLoading, setSalaryLoading] = useState(true);
+  const [companyActivity, setCompanyActivity] = useState<{
+    summary: { total_companies: number; active_companies: number; total_jobs_found: number };
+    recent_activity: Array<{
+      id: string;
+      started_at: string | null;
+      status: string | null;
+      jobs_found: number;
+      new_jobs_saved: number;
+      error_message: string | null;
+      duration_seconds: number | null;
+    }>;
+  } | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -146,6 +158,19 @@ export default function DashboardPage() {
       }
     }
     loadSalary();
+  }, []);
+
+  // Load company search activity
+  useEffect(() => {
+    async function loadActivity() {
+      try {
+        const { data } = await targetCompaniesApi.activity({ limit: 10 });
+        setCompanyActivity(data);
+      } catch {
+        // Silently handle
+      }
+    }
+    loadActivity();
   }, []);
 
   const statCards = [
@@ -224,6 +249,56 @@ export default function DashboardPage() {
           </div>
         )}
       </div>
+
+      {/* Company Search Activity */}
+      {companyActivity && companyActivity.summary.total_companies > 0 && (
+        <div className="card">
+          <h2 className="mb-4 text-lg font-semibold text-[var(--foreground)] flex items-center gap-2">
+            <FiBriefcase className="h-5 w-5 text-purple-600" /> Company Career Search
+          </h2>
+          <div className="grid grid-cols-3 gap-4 mb-4">
+            <div className="rounded-lg bg-[var(--muted)] p-3 text-center">
+              <p className="text-xl font-bold text-[var(--foreground)]">{companyActivity.summary.total_companies}</p>
+              <p className="text-[10px] text-[var(--muted-foreground)]">Target Companies</p>
+            </div>
+            <div className="rounded-lg bg-[var(--muted)] p-3 text-center">
+              <p className="text-xl font-bold text-[var(--foreground)]">{companyActivity.summary.active_companies}</p>
+              <p className="text-[10px] text-[var(--muted-foreground)]">Active</p>
+            </div>
+            <div className="rounded-lg bg-[var(--muted)] p-3 text-center">
+              <p className="text-xl font-bold text-[var(--foreground)]">{companyActivity.summary.total_jobs_found}</p>
+              <p className="text-[10px] text-[var(--muted-foreground)]">Jobs Found</p>
+            </div>
+          </div>
+          {companyActivity.recent_activity.length > 0 && (
+            <div>
+              <h3 className="text-sm font-semibold text-[var(--muted-foreground)] mb-2">Recent Activity</h3>
+              <div className="space-y-2">
+                {companyActivity.recent_activity.slice(0, 5).map((act) => (
+                  <div key={act.id} className="flex items-center justify-between rounded-lg border border-[var(--border)] px-3 py-2 text-sm">
+                    <div className="flex items-center gap-2">
+                      {act.status === "success" ? (
+                        <FiCheckCircle className="h-4 w-4 text-green-500" />
+                      ) : act.status === "failed" ? (
+                        <FiAlertTriangle className="h-4 w-4 text-red-500" />
+                      ) : (
+                        <FiActivity className="h-4 w-4 text-blue-500 animate-pulse" />
+                      )}
+                      <span className="text-[var(--foreground)]">
+                        {act.jobs_found > 0 ? `${act.new_jobs_saved} new jobs found` : act.error_message || "No new jobs"}
+                      </span>
+                    </div>
+                    <div className="text-xs text-[var(--muted-foreground)]">
+                      {act.started_at ? new Date(act.started_at).toLocaleString() : "—"}
+                      {act.duration_seconds != null && ` (${act.duration_seconds}s)`}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Did You Know? — Skills Insights Widget */}
       <div className="card">

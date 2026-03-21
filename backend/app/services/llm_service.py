@@ -46,7 +46,9 @@ class LLMService:
             h["Authorization"] = f"Bearer {self.api_key}"
         return h
 
-    async def generate(self, prompt: str, *, system: str | None = None) -> str:
+    async def generate(
+        self, prompt: str, *, system: str | None = None, max_tokens: int | None = None
+    ) -> str:
         """
         Generate a text completion via chat completions endpoint.
         Returns the raw response text.
@@ -56,7 +58,7 @@ class LLMService:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 
-        return await self.chat(messages)
+        return await self.chat(messages, max_tokens=max_tokens)
 
     async def generate_json(
         self, prompt: str, *, system: str | None = None
@@ -71,6 +73,7 @@ class LLMService:
     async def chat(
         self,
         messages: list[dict[str, str]],
+        max_tokens: int | None = None,
     ) -> str:
         """
         Multi-turn chat via OpenAI-compatible chat completions.
@@ -80,7 +83,7 @@ class LLMService:
             "model": self.model,
             "messages": messages,
             "temperature": self.temperature,
-            "max_tokens": self.max_tokens,
+            "max_tokens": max_tokens or self.max_tokens,
         }
 
         async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -254,53 +257,80 @@ class LLMService:
         self, master_latex: str, job_description: str, company: str, role: str
     ) -> dict[str, Any]:
         """Tailor a resume for a specific job using AI."""
+        # Build a structural inventory so the LLM knows exactly what must be preserved
+        inventory = self._build_resume_inventory(master_latex)
+        inventory_text = "\n".join(f"  - {item}" for item in inventory)
+
         system = (
             "You are an expert resume writer and ATS optimization specialist.\n\n"
-            "ABSOLUTE RULES — violating any of these is a critical failure:\n"
-            "1. IMMUTABLE FACTS (do NOT change, add, or remove):\n"
-            "   - Company names in experience section\n"
-            "   - Job titles in experience section\n"
-            "   - Employment dates (month/year ranges)\n"
-            "   - Education institutions, degrees, dates, GPA\n"
-            "   - Project names\n"
-            "   - The number of experience entries — do NOT add or remove any\n"
-            "   - Contact information (name, email, phone, URLs)\n"
-            "   - Numerical metrics and statistics from the original (%, dollar amounts, etc.)\n"
-            "2. YOU MUST NOT invent, fabricate, or hallucinate any company, role, or experience\n"
-            "   that does not already exist in the original resume.\n"
-            "3. WHAT YOU CAN CHANGE:\n"
-            "   - Reword bullet points under existing experience to emphasize relevant skills\n"
-            "   - Reorder sections (e.g., put most relevant experience first)\n"
-            "   - Update the Skills section to highlight relevant technologies\n"
-            "   - Add ATS keywords from the job description into existing bullets naturally\n"
-            "   - Adjust summary/objective text\n"
-            "   - Minor formatting tweaks for fit on one page\n"
-            "4. LATEX RULES:\n"
-            "   - Keep the EXACT same \\documentclass line and usepackage declarations.\n"
-            "   - Preserve all custom commands (\\newcommand, \\def) from the original.\n"
-            "   - Ensure all environments (\\begin{...} / \\end{...}) are balanced.\n"
-            "   - Escape special characters: %, $, &, #, _ must be \\%, \\$, \\&, \\#, \\_.\n"
-            "   - Start with \\documentclass and end with \\end{document}.\n"
-            "5. Every company and position in the output MUST exist in the input resume.\n"
-            "6. If unsure whether to change something, KEEP THE ORIGINAL TEXT."
+            "THE MASTER RESUME IS YOUR SOP — it is the GROUND TRUTH.\n"
+            "You may ONLY ADD to it or MODIFY existing bullet text. You must NEVER REMOVE anything.\n\n"
+            "═══════════════════════════════════════════════════\n"
+            "  RULE 1: NEVER REMOVE ANYTHING (ZERO TOLERANCE)\n"
+            "═══════════════════════════════════════════════════\n"
+            "  - Every \\section in the master MUST appear in the output.\n"
+            "  - Every \\resumeSubheading (experience entry) MUST appear.\n"
+            "  - Every \\resumeProjectHeading (project entry) MUST appear.\n"
+            "  - Every \\resumeItem (bullet point) MUST appear (modified text is OK).\n"
+            "  - Do NOT add new sections that duplicate existing ones.\n"
+            "    (e.g., if 'Technical Skills' exists, do NOT add a separate 'Skills' section)\n\n"
+            "═══════════════════════════════════════════════════\n"
+            "  RULE 2: PRESERVE EXACT LaTeX STRUCTURE\n"
+            "═══════════════════════════════════════════════════\n"
+            "  - If a section uses raw \\begin{itemize}...\\end{itemize}, keep that exact format.\n"
+            "    Do NOT convert it to \\resumeSubHeadingListStart/\\resumeItemListStart.\n"
+            "  - If a section uses \\resumeSubHeadingListStart, keep that exact format.\n"
+            "  - Preserve the EXACT preamble: \\documentclass, \\usepackage, \\newcommand lines.\n"
+            "  - Do NOT add new \\usepackage or \\newcommand lines.\n\n"
+            "═══════════════════════════════════════════════════\n"
+            "  RULE 3: IMMUTABLE FACTS\n"
+            "═══════════════════════════════════════════════════\n"
+            "  - Company names, job titles, employment dates: COPY EXACTLY.\n"
+            "  - Education: institution, degree, dates, GPA: COPY EXACTLY.\n"
+            "  - Project names and the tech stacks in project headers: COPY EXACTLY.\n"
+            "  - Contact info (name, email, phone, URLs): COPY EXACTLY.\n"
+            "  - Numerical metrics/stats from the original (percentages, counts): PRESERVE.\n"
+            "  - GitHub links: COPY EXACTLY.\n\n"
+            "═══════════════════════════════════════════════════\n"
+            "  RULE 4: WHAT YOU CAN MODIFY\n"
+            "═══════════════════════════════════════════════════\n"
+            "  a) REORDER sections by relevance to the target role.\n"
+            "  b) REORDER entries within a section by relevance.\n"
+            "  c) REORDER bullet points within an entry by relevance.\n"
+            "  d) REWRITE bullet text under Experience to match job requirements.\n"
+            "     You MAY fabricate/embellish work descriptions under existing companies.\n"
+            "     If the JD needs React, Node.js, AWS — bullets should reflect that.\n"
+            "  e) ENHANCE project bullet text to highlight relevant aspects.\n"
+            "     But keep the original meaning — don't turn an AI Trading project into\n"
+            "     something unrelated. Add relevant keywords naturally.\n"
+            "  f) ADD new bullet points to any existing entry.\n"
+            "  g) ADD new skills/keywords to the Technical Skills / Skills section.\n\n"
+            "═══════════════════════════════════════════════════\n"
+            "  RULE 5: KEYWORD STRATEGY\n"
+            "═══════════════════════════════════════════════════\n"
+            "  - Weave JD keywords into Experience bullets and Skills subtly.\n"
+            "  - Not keyword-stuffed — integrated naturally into sentences.\n"
         )
         prompt = (
-            f"Tailor this resume for {role} at {company}.\n\n"
-            f"MASTER RESUME (LaTeX):\n{master_latex[:6000]}\n\n"
+            f"Tailor this resume for **{role}** at **{company}**.\n\n"
+            f"MASTER RESUME STRUCTURAL INVENTORY (every item MUST appear in output):\n"
+            f"{inventory_text}\n\n"
+            f"MASTER RESUME (LaTeX):\n{master_latex}\n\n"
             f"JOB DESCRIPTION:\n{job_description[:4000]}\n\n"
-            "Return ONLY the complete tailored LaTeX source. "
-            "Start directly with \\documentclass. No markdown fences. "
-            "Remember: same companies, same titles, same dates — only reword bullets and skills."
+            "Return ONLY the complete tailored LaTeX source.\n"
+            "Start directly with \\documentclass. No markdown fences.\n"
+            "REMEMBER: every section, every entry, every bullet from the inventory above "
+            "MUST appear in your output. You may modify text and reorder — but NEVER remove."
         )
-        raw = await self.generate(prompt, system=system)
+        raw = await self.generate(prompt, system=system, max_tokens=8000)
         # Clean up any markdown fencing
         if raw.strip().startswith("```"):
             lines = raw.strip().split("\n")
             lines = [l for l in lines if not l.strip().startswith("```")]
             raw = "\n".join(lines).strip()
 
-        # Verify immutable facts are preserved
-        raw = await self._verify_immutable_facts(master_latex, raw, company, role)
+        # Structural validation: ensure no sections/entries were dropped (zero LLM calls)
+        raw = self._validate_structure_preserved(master_latex, raw)
 
         # Compile-verify-retry: ensure the tailored LaTeX actually compiles
         fixed, compiled = await self._ensure_compilable_latex(
@@ -311,61 +341,198 @@ class LLMService:
 
         return {"tailored_latex": fixed, "compile_success": compiled}
 
-    async def _verify_immutable_facts(
-        self, original: str, tailored: str, company: str, role: str
-    ) -> str:
+    @staticmethod
+    def _build_resume_inventory(latex: str) -> list[str]:
         """
-        Verify that the tailored resume preserves immutable facts from the original.
-        If violations are found, ask the LLM to fix them.
+        Parse the master resume LaTeX and build a human-readable inventory
+        of all sections, entries, and bullet counts. This is included in the
+        prompt so the LLM knows exactly what it must preserve.
         """
-        system = (
-            "You are a resume integrity auditor. Compare the ORIGINAL and TAILORED resumes below.\n"
-            "Check if ANY of these immutable facts were changed:\n"
-            "- Company names in experience section\n"
-            "- Job titles / position names\n"
-            "- Employment date ranges\n"
-            "- Education institutions, degrees, dates\n"
-            "- Contact information (name, email, phone)\n"
-            "- New companies or positions added that don't exist in the original\n\n"
-            "Return ONLY valid JSON:\n"
-            '{"violations_found": true/false, "violations": ["description of each violation"]}\n'
-            "Return ONLY the JSON — no markdown, no commentary."
+        import re
+        items: list[str] = []
+
+        # Sections
+        sections = re.findall(r"\\section\{([^}]+)\}", latex)
+        items.append(f"SECTIONS ({len(sections)}): {', '.join(sections)}")
+
+        # Experience entries (resumeSubheading)
+        exp_entries = re.findall(
+            r"\\resumeSubheading\s*\{([^}]*)\}\s*\{([^}]*)\}\s*\{([^}]*)\}\s*\{([^}]*)\}",
+            latex,
         )
-        prompt = (
-            f"ORIGINAL:\n{original[:4000]}\n\n"
-            f"TAILORED:\n{tailored[:4000]}"
+        items.append(f"EXPERIENCE ENTRIES ({len(exp_entries)}):")
+        for company_name, dates, title, location in exp_entries:
+            items.append(f"  • {company_name} | {title} | {dates}")
+
+        # Project entries (resumeProjectHeading)
+        proj_entries = re.findall(
+            r"\\resumeProjectHeading\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}\s*\{([^}]*)\}",
+            latex,
         )
-        try:
-            result = await self.generate_json(prompt, system=system)
-            if result.get("violations_found") and result.get("violations"):
-                violations = result["violations"]
-                logger.warning(
-                    "Immutable fact violations detected in tailored resume",
-                    violations=violations,
-                    company=company,
-                    role=role,
+        items.append(f"PROJECT ENTRIES ({len(proj_entries)}):")
+        for proj_text, date in proj_entries:
+            # Extract just the project name from \textbf{Name}
+            name_match = re.search(r"\\textbf\{([^}]+)\}", proj_text)
+            name = name_match.group(1) if name_match else proj_text[:60]
+            items.append(f"  • {name} ({date})")
+
+        # Bullet counts per section
+        # Split by \section and count \resumeItem in each
+        section_splits = re.split(r"(\\section\{[^}]+\})", latex)
+        current_section = ""
+        for part in section_splits:
+            sec_match = re.match(r"\\section\{([^}]+)\}", part)
+            if sec_match:
+                current_section = sec_match.group(1)
+            elif current_section:
+                bullet_count = len(re.findall(r"\\resumeItem\{", part))
+                if bullet_count > 0:
+                    items.append(f"BULLETS in '{current_section}': {bullet_count}")
+
+        return items
+
+    @staticmethod
+    def _validate_structure_preserved(original: str, tailored: str) -> str:
+        """
+        Deep structural validation: ensure no sections, entries, or bullets
+        were dropped from the tailored output. Also removes duplicate sections.
+        This is a zero-LLM-call check — pure regex analysis.
+
+        If entries are missing, splice them back from the original.
+        """
+        import re
+
+        # ── 1. Remove duplicate sections ──────────────────────────────
+        # e.g., if both "Technical Skills" and "Skills" exist, remove "Skills"
+        section_pattern = re.compile(r"\\section\{([^}]+)\}")
+        seen_sections: dict[str, int] = {}
+        for m in section_pattern.finditer(tailored):
+            name = m.group(1).strip()
+            norm = name.lower().replace(" ", "")
+            # "skills" is a suffix-duplicate of "technicalskills"
+            seen_sections.setdefault(norm, 0)
+            seen_sections[norm] += 1
+
+        # Check for near-duplicate section names
+        section_names = [m.group(1).strip() for m in section_pattern.finditer(tailored)]
+        norms = [s.lower().replace(" ", "") for s in section_names]
+        to_remove: list[str] = []
+        for i, norm_i in enumerate(norms):
+            for j, norm_j in enumerate(norms):
+                if i != j and norm_i != norm_j:
+                    # "skills" is a subset of "technicalskills"
+                    if norm_i in norm_j and len(norm_i) < len(norm_j):
+                        # norm_i is the shorter duplicate — check it wasn't in original
+                        orig_norms = [
+                            s.lower().replace(" ", "")
+                            for s in re.findall(r"\\section\{([^}]+)\}", original)
+                        ]
+                        if norm_i not in orig_norms:
+                            to_remove.append(section_names[i])
+
+        for sec_name in to_remove:
+            logger.warning("Removing duplicate section from tailored output", section=sec_name)
+            sec_re = re.compile(
+                rf"\\section\{{{re.escape(sec_name)}\}}.*?(?=\\section\{{|\\end\{{document\}})",
+                re.DOTALL,
+            )
+            tailored = sec_re.sub("", tailored)
+
+        # ── 2. Splice back missing sections ────────────────────────────
+        orig_sections = [m.group(1).strip() for m in section_pattern.finditer(original)]
+        tail_sections = [m.group(1).strip() for m in section_pattern.finditer(tailored)]
+        tail_sections_lower = {s.lower() for s in tail_sections}
+
+        missing_sections = [s for s in orig_sections if s.lower() not in tail_sections_lower]
+        if missing_sections:
+            logger.warning("Tailored resume dropped sections", missing=missing_sections)
+            end_doc_idx = tailored.rfind("\\end{document}")
+            if end_doc_idx == -1:
+                end_doc_idx = len(tailored)
+            for sec_name in missing_sections:
+                match = re.search(
+                    rf"(\\section\{{{re.escape(sec_name)}\}})",
+                    original, re.IGNORECASE,
                 )
-                # Ask LLM to fix the violations
-                fix_system = (
-                    "You are fixing a tailored resume that incorrectly changed immutable facts. "
-                    "The violations are listed below. Fix ONLY those violations by restoring "
-                    "the original facts while keeping all other tailoring improvements. "
-                    "Return ONLY the complete corrected LaTeX source — no markdown, no commentary."
-                )
-                fix_prompt = (
-                    f"VIOLATIONS:\n" + "\n".join(f"- {v}" for v in violations) + "\n\n"
-                    f"ORIGINAL RESUME:\n{original[:4000]}\n\n"
-                    f"TAILORED RESUME (with violations):\n{tailored[:6000]}\n\n"
-                    "Return the corrected LaTeX."
-                )
-                fixed = await self.generate(fix_prompt, system=fix_system)
-                if fixed.strip().startswith("```"):
-                    lines = fixed.strip().split("\n")
-                    lines = [l for l in lines if not l.strip().startswith("```")]
-                    fixed = "\n".join(lines).strip()
-                return fixed
-        except Exception as e:
-            logger.warning("Immutable fact verification failed", error=str(e))
+                if not match:
+                    continue
+                start = match.start()
+                next_sec = re.search(r"\\section\{", original[match.end():])
+                if next_sec:
+                    end = match.end() + next_sec.start()
+                else:
+                    ed = original.find("\\end{document}", match.end())
+                    end = ed if ed != -1 else len(original)
+                section_content = original[start:end].rstrip() + "\n\n"
+                tailored = tailored[:end_doc_idx] + section_content + tailored[end_doc_idx:]
+                end_doc_idx = tailored.rfind("\\end{document}")
+                if end_doc_idx == -1:
+                    end_doc_idx = len(tailored)
+
+        # ── 3. Splice back missing experience entries ────────────────
+        exp_pattern = re.compile(
+            r"\\resumeSubheading\s*\{([^}]*)\}\s*\{[^}]*\}\s*\{[^}]*\}\s*\{[^}]*\}"
+        )
+        orig_companies = {m.group(1).strip().lower() for m in exp_pattern.finditer(original)}
+        tail_companies = {m.group(1).strip().lower() for m in exp_pattern.finditer(tailored)}
+        missing_exp = orig_companies - tail_companies
+
+        if missing_exp:
+            logger.warning("Tailored resume dropped experience entries", missing=list(missing_exp))
+            for comp_lower in missing_exp:
+                # Find the full entry block in original: \resumeSubheading{...} ... next \resumeSubheading or \resumeSubHeadingListEnd
+                for m in exp_pattern.finditer(original):
+                    if m.group(1).strip().lower() == comp_lower:
+                        start = m.start()
+                        rest = original[m.end():]
+                        next_entry = re.search(
+                            r"\\resumeSubheading\{|\\resumeSubHeadingListEnd",
+                            rest,
+                        )
+                        end = m.end() + next_entry.start() if next_entry else len(original)
+                        block = original[start:end]
+                        # Insert before \resumeSubHeadingListEnd in the Experience section
+                        insert_re = re.search(
+                            r"(\\section\{.*?[Ee]xperience.*?\}.*?)(\\resumeSubHeadingListEnd)",
+                            tailored,
+                            re.DOTALL,
+                        )
+                        if insert_re:
+                            idx = insert_re.start(2)
+                            tailored = tailored[:idx] + block + "\n    " + tailored[idx:]
+                        break
+
+        # ── 4. Splice back missing project entries ────────────────
+        proj_pattern = re.compile(
+            r"\\resumeProjectHeading\s*\{.*?\\textbf\{([^}]+)\}.*?\}\s*\{[^}]*\}"
+        )
+        orig_projects = {m.group(1).strip().lower() for m in proj_pattern.finditer(original)}
+        tail_projects = {m.group(1).strip().lower() for m in proj_pattern.finditer(tailored)}
+        missing_proj = orig_projects - tail_projects
+
+        if missing_proj:
+            logger.warning("Tailored resume dropped project entries", missing=list(missing_proj))
+            for proj_lower in missing_proj:
+                for m in proj_pattern.finditer(original):
+                    if m.group(1).strip().lower() == proj_lower:
+                        start = m.start()
+                        rest = original[m.end():]
+                        next_entry = re.search(
+                            r"\\resumeProjectHeading\{|\\resumeSubHeadingListEnd",
+                            rest,
+                        )
+                        end = m.end() + next_entry.start() if next_entry else len(original)
+                        block = original[start:end]
+                        insert_re = re.search(
+                            r"(\\section\{.*?[Pp]roject.*?\}.*?)(\\resumeSubHeadingListEnd)",
+                            tailored,
+                            re.DOTALL,
+                        )
+                        if insert_re:
+                            idx = insert_re.start(2)
+                            tailored = tailored[:idx] + block + "\n    " + tailored[idx:]
+                        break
+
         return tailored
 
     async def generate_changes_summary(

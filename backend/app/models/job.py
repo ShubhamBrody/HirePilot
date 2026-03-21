@@ -80,7 +80,7 @@ class JobListing(Base):
 
     # Relationships
     recruiters = relationship("Recruiter", back_populates="job_listing", lazy="selectin")
-    applications = relationship("Application", back_populates="job_listing", lazy="selectin")
+    applications = relationship("Application", back_populates="job_listing", lazy="selectin", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
         return f"<JobListing {self.title} @ {self.company}>"
